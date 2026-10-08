@@ -1,0 +1,52 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * Helpers de Autenticación y Roles
+     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/roles_admin/$(request.auth.uid));
+    }
+
+    /**
+     * Gestión de Roles Globales
+     */
+    match /roles_admin/{adminId} {
+      allow get: if true;
+      allow read, write: if false; 
+    }
+
+    /**
+     * Anuncios del Sistema y Métricas
+     */
+    match /system/{allData=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    /**
+     * Estructura Multi-Tenant
+     * Bloque principal para los datos de cada taller/negocio
+     */
+    match /users/{userId} {
+      // Permitimos lectura y escritura al dueño del negocio o al administrador global
+      // El administrador global tiene permiso de lectura a todos los perfiles para monitorear actividad
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+
+      /**
+       * Subcolecciones (sale_transactions, products, repair_jobs, workers, etc.)
+       * Aplicamos la misma lógica de propiedad a todos los datos anidados.
+       */
+      match /{allData=**} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "POS Mariche",
+  "short_name": "Mariche",
+  "description": "Gestión Integral de Negocio y Taller",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#2532c2",
+  "theme_color": "#2532c2",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
