@@ -17,16 +17,7 @@ import {
  */
 export function initializeFirebase() {
   if (!getApps().length) {
-    let firebaseApp;
-    try {
-      firebaseApp = initializeApp();
-    } catch (e) {
-      if (process.env.NODE_ENV === "production") {
-        console.warn('Automatic initialization failed. Falling back to firebase config object.', e);
-      }
-      firebaseApp = initializeApp(firebaseConfig);
-    }
-
+    const firebaseApp = initializeApp(firebaseConfig);
     return getSdks(firebaseApp);
   }
 
@@ -51,7 +42,7 @@ export function getSdks(firebaseApp: FirebaseApp) {
     try {
       firestore = initializeFirestore(firebaseApp, {
         localCache: persistentLocalCache({
-          tabManager: persistentSingleTabManager()
+          tabManager: persistentSingleTabManager({})
         })
       });
     } catch (e) {

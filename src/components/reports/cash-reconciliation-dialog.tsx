@@ -22,7 +22,15 @@ type CashReconciliationDialogProps = {
   openSales: Sale[];
 };
 
-const paymentMethodsOrder: PaymentMethod[] = ['Efectivo USD', 'Efectivo Bs', 'Tarjeta', 'Pago Móvil', 'Transferencia', 'USDT / Crypto'];
+const paymentMethodsOrder: PaymentMethod[] = [
+  'Efectivo USD',
+  'Efectivo Bs',
+  'Tarjeta',
+  'Pago Móvil',
+  'Transferencia',
+  'Tarjeta / Pago Móvil',
+  'USDT / Crypto',
+];
 
 export function CashReconciliationDialog({ openSales }: CashReconciliationDialogProps) {
   const { firestore, user } = useFirebase();
@@ -40,14 +48,11 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     'Tarjeta': 0,
     'Pago Móvil': 0,
     'Transferencia': 0,
+    'Tarjeta / Pago Móvil': 0,
     'USDT / Crypto': 0,
   });
 
-  const profileRef = useMemoFirebase(() => 
-    (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-    [firestore, user?.uid]
-  );
-  const { data: profile } = useDoc<UserProfile>(profileRef);
+  const { profile } = useDashboardStore();
 
   const {
     expectedAmounts,
@@ -62,6 +67,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       'Tarjeta': 0,
       'Pago Móvil': 0,
       'Transferencia': 0,
+      'Tarjeta / Pago Móvil': 0,
       'USDT / Crypto': 0,
     };
     let paymentsUSD = 0;
@@ -136,6 +142,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       'Tarjeta': 0,
       'Pago Móvil': 0,
       'Transferencia': 0,
+      'Tarjeta / Pago Móvil': 0,
       'USDT / Crypto': 0,
     });
   };
@@ -156,8 +163,10 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     setIsClosing(true);
 
     const now = new Date();
+    const nowIso = now.toISOString();
     const todayStr = formatDate(now, 'yyyy-MM-dd');
     const reconciliationId = `RECON-${todayStr}-${now.getTime()}`;
+    const updatedInitialBalances = { ...countedAmounts };
     
     const batch = writeBatch(firestore);
     const reconciliationRef = doc(firestore, 'users', user.uid, 'daily_reconciliations', reconciliationId);
@@ -178,7 +187,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       date: todayStr,
       totalSales: totalSalesValue,
       totalTransactions: transactionCount,
-      closedAt: now.toISOString(),
+      closedAt: nowIso,
       paymentMethods: paymentMethodDetails,
       totalExpected: netExpectedInUSD,
       totalCounted: totalCountedInUSD,
@@ -189,27 +198,30 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     };
     batch.set(reconciliationRef, newReconciliation);
 
-    openSales.forEach(sale => {
-      const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', sale.id!);
-      batch.update(saleRef, { reconciliationId: reconciliationId });
-    });
-
-    const nowIso = now.toISOString();
-    const updatedInitialBalances = {
-      'Efectivo USD': countedAmounts['Efectivo USD'] || 0,
-      'Efectivo Bs': countedAmounts['Efectivo Bs'] || 0,
-      'Tarjeta / Pago Móvil': (countedAmounts['Tarjeta'] || 0) + (countedAmounts['Pago Móvil'] || 0),
-      'Transferencia': countedAmounts['Transferencia'] || 0,
-    };
-
     const settingsRef = doc(firestore, 'users', user.uid, 'app-settings', 'main');
     batch.set(settingsRef, {
       balancesUpdatedAt: nowIso,
       initialBalances: updatedInitialBalances,
     }, { merge: true });
 
+    const BATCH_LIMIT = 400;
+    const batches = [batch];
+    let currentBatch = batch;
+    let operationCount = 2; // reconciliationRef and settingsRef
+
+    openSales.forEach(sale => {
+      if (operationCount >= BATCH_LIMIT) {
+        currentBatch = writeBatch(firestore);
+        batches.push(currentBatch);
+        operationCount = 0;
+      }
+      const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', sale.id!);
+      currentBatch.update(saleRef, { reconciliationId: reconciliationId });
+      operationCount++;
+    });
+
     try {
-      await batch.commit();
+      await Promise.all(batches.map(b => b.commit()));
 
       // INYECCIÓN ATÓMICA EN MEMORIA (Reactividad Instantánea 0ms - Sin lecturas)
       // 1. Marcamos las ventas como conciliadas en el caché global para que desaparezcan de la vista "Abierta"

@@ -1,5 +1,6 @@
 "use client";
 
+import { cleanObject } from "@/lib/json-guard";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -29,6 +30,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/use-currency";
 import { Label } from "../ui/label";
 import { useFirebase, useCollection, useMemoFirebase, useDoc } from "@/firebase";
+import { useDashboardStore } from "@/contexts/dashboard-context";
 import { doc, runTransaction, type DocumentSnapshot, collection, query, orderBy, limit, increment, getDoc, where, getDocs } from "firebase/firestore";
 import { handlePrintAllTickets } from "./repair-ticket";
 import { User, Smartphone, Package, Search, Plus, Trash2, Loader2, DollarSign, Calculator, UserCheck, Hammer, TicketPercent, Landmark, X } from "lucide-react";
@@ -57,23 +59,6 @@ const formSchema = z.object({
   reservedParts: z.array(z.any()).default([]),
   isPromo: z.boolean().default(false),
 });
-
-function cleanObject(obj: any): any {
-    if (obj === null || obj === undefined) return obj;
-    const cleaned = { ...obj };
-    Object.keys(cleaned).forEach(key => {
-        if (cleaned[key] === undefined) {
-            delete cleaned[key];
-        } else if (Array.isArray(cleaned[key])) {
-            cleaned[key] = cleaned[key].map((item: any) => 
-                (typeof item === 'object' && item !== null) ? cleanObject(item) : item
-            );
-        } else if (typeof cleaned[key] === 'object' && cleaned[key] !== null) {
-            cleaned[key] = cleanObject(cleaned[key]);
-        }
-    });
-    return cleaned;
-}
 
 /**
  * MODAL MANUAl REPLICA EXACTA: Implementación de diseño pixel-perfect y lógica de doble tasa.
@@ -255,8 +240,8 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
   });
 
   const productsQuery = useMemoFirebase(() => 
-    (firestore && user) ? query(collection(firestore, 'users', user.uid, 'products'), orderBy('name'), limit(200)) : null,
-    [firestore, user?.uid]
+    (firestore && user && open) ? query(collection(firestore, 'users', user.uid, 'products'), orderBy('name'), limit(200)) : null,
+    [firestore, user?.uid, open]
   );
   const { data: allProducts, isLoading: productsLoading } = useCollection<Product>(productsQuery);
 
@@ -273,11 +258,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
     ).slice(0, 20);
   }, [allProducts, productSearch]);
 
-  const profileRef = useMemoFirebase(() => 
-    (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-    [firestore, user?.uid]
-  );
-  const { data: profile } = useDoc<UserProfile>(profileRef);
+  const { profile } = useDashboardStore();
 
   const reservedParts = form.watch("reservedParts") as (ReservedPart & { isPromo?: boolean, isWarranty?: boolean, isManual?: boolean, isConsumed?: boolean, manualPriceBs?: number, manualPriceOffer?: number })[];
   const watchedID = form.watch("customerID");
@@ -285,7 +266,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
 
   useEffect(() => {
     const fetchCustomer = async () => {
-      if (!firestore || !user || !watchedID || watchedID.length < 5) {
+      if (!open || !firestore || !user || !watchedID || watchedID.length < 5) {
         setLookedUpCustomer(null);
         return;
       }
@@ -296,7 +277,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
     };
     const debounce = setTimeout(fetchCustomer, 600);
     return () => clearTimeout(debounce);
-  }, [watchedID, firestore, user]);
+  }, [watchedID, firestore, user, open]);
 
   const handleApplyCustomerData = () => {
     if (lookedUpCustomer) {

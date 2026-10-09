@@ -58,6 +58,9 @@ function RepairsContent() {
     );
     const { data: repairJobs, isLoading, mutate: mutateRepairs } = useCollection<RepairJob>(repairJobsQuery);
 
+    const [editingJob, setEditingJob] = useState<RepairJob | null>(null);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+
     const filteredRepairJobs = useMemo(() => {
         if (!repairJobs) return [];
         let temp = repairJobs;
@@ -117,7 +120,13 @@ function RepairsContent() {
                     isLoading={isLoading}
                     filterPlaceholder="Buscar cliente o equipo..."
                     globalFilterFn={repairFilterFn}
-                    meta={{ mutate: mutateRepairs }}
+                    meta={{ 
+                        mutate: mutateRepairs,
+                        onEditRepair: (job: RepairJob) => {
+                            setEditingJob(job);
+                            setIsEditDialogOpen(true);
+                        }
+                    }}
                 >
                     {(table) => (
                         <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -136,6 +145,18 @@ function RepairsContent() {
                         </div>
                     )}
                 </DataTable>
+
+                {editingJob && (
+                    <RepairFormDialog 
+                        repairJob={editingJob} 
+                        isOpen={isEditDialogOpen} 
+                        onOpenChange={(open) => {
+                            setIsEditDialogOpen(open);
+                            if (!open) setEditingJob(null);
+                        }} 
+                        onSaved={handleOptimisticUpdate} 
+                    />
+                )}
             </main>
         </>
     )

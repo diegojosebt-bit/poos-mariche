@@ -1,5 +1,6 @@
 "use client";
 
+import { cleanObject } from "@/lib/json-guard";
 import type { CartItem, Payment, Product, Sale, RepairJob, ReservedPart } from "@/lib/types";
 import { Button } from "../ui/button";
 import { Trash2, TicketPercent, Gift, ParkingSquare, UserPlus, UserX, UserCheck, Search, BadgePercent, Tag } from "lucide-react";
@@ -25,23 +26,6 @@ import { useDashboardStore } from "@/contexts/dashboard-context";
 function generateSaleId() {
     const date = new Date();
     return `S-${format(date, "yyMMdd")}-${Math.floor(1000 + Math.random() * 9000)}`;
-}
-
-function cleanObject(obj: any): any {
-    if (obj === null || obj === undefined) return obj;
-    const cleaned = { ...obj };
-    Object.keys(cleaned).forEach(key => {
-        if (cleaned[key] === undefined) {
-            delete cleaned[key];
-        } else if (Array.isArray(cleaned[key])) {
-            cleaned[key] = cleaned[key].map((item: any) => 
-                (typeof item === 'object' && item !== null) ? cleanObject(item) : item
-            );
-        } else if (typeof cleaned[key] === 'object' && cleaned[key] !== null) {
-            cleaned[key] = cleanObject(cleaned[key]);
-        }
-    });
-    return cleaned;
 }
 
 function CustomerDialog({ onSave, currentName, currentID, sales }: { onSave: (name: string, id: string) => void, currentName: string, currentID: string, sales: Sale[] }) {
@@ -181,6 +165,20 @@ function DiscountItemControl({ productId, currentDiscount, onApply }: { productI
             </PopoverContent>
         </Popover>
     );
+}
+
+export interface CartDisplayProps {
+  cart: CartItem[];
+  allProducts: Product[];
+  onUpdateQuantity: (productId: string, quantity: number) => void;
+  onUpdateDiscount: (productId: string, discount: number) => void;
+  onRemoveItem: (productId: string, isRepair?: boolean) => void;
+  onClearCart: () => void;
+  onTogglePromo: (productId: string) => void;
+  onToggleGift: (productId: string) => void;
+  onHoldSale?: (name: string, customerName?: string, customerID?: string) => void;
+  onCheckoutSuccess?: (sale: Sale, consumedParts?: ReservedPart[]) => void;
+  repairJobId?: string | null;
 }
 
 export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDiscount, onRemoveItem, onClearCart, repairJobId, onTogglePromo, onToggleGift, onHoldSale, onCheckoutSuccess }: CartDisplayProps) {
@@ -414,6 +412,11 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
             });
 
             transaction.set(saleRef, saleData);
+
+            const guardianRef = doc(firestore, 'users', user.uid, 'metadata', 'inventory_status');
+            transaction.set(guardianRef, {
+                lastUpdated: new Date().toISOString()
+            }, { merge: true });
         });
 
         if (repairJobId && repairUpdateForCache) {

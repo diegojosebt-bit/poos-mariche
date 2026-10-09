@@ -2,7 +2,7 @@
 
 import type { CartItem, Payment, PaymentMethod, Sale, Product, UserProfile, RepairJob } from "@/lib/types";
 import { Button } from "../ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 import { useState, type ReactNode, useMemo, useEffect } from "react";
 import { 
     CreditCard, 
@@ -32,8 +32,8 @@ import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { Checkbox } from "../ui/checkbox";
-import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
-import { doc } from "firebase/firestore";
+import { useFirebase } from "@/firebase";
+import { useDashboardStore } from "@/contexts/dashboard-context";
 import { Badge } from "../ui/badge";
 
 type CheckoutDialogProps = {
@@ -94,12 +94,7 @@ export function CheckoutDialog({
   const [isGivingChange, setIsGivingChange] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
-
-  const profileRef = useMemoFirebase(() => 
-    (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-    [firestore, user?.uid]
-  );
-  const { data: profile } = useDoc<UserProfile>(profileRef);
+  const { profile } = useDashboardStore();
   
   const hasPromo = useMemo(() => cart.some(item => item.isPromo), [cart]);
 
@@ -278,9 +273,9 @@ export function CheckoutDialog({
                         <DialogTitle className="text-base sm:text-lg font-semibold text-foreground tracking-tight">
                             ¡Venta procesada con éxito!
                         </DialogTitle>
-                        <p className="text-xs text-muted-foreground font-normal">
+                        <DialogDescription className="text-xs text-muted-foreground font-normal">
                             Comprobante #{completedSale.id}
-                        </p>
+                        </DialogDescription>
                     </div>
                   </div>
                   <Badge variant="outline" className="bg-background text-emerald-600 border-emerald-500/30 text-xs font-medium px-2.5 py-0.5">
@@ -324,6 +319,9 @@ export function CheckoutDialog({
                         <DialogTitle className="text-base sm:text-lg font-semibold tracking-tight text-foreground">
                             Procesar Pago
                         </DialogTitle>
+                        <DialogDescription className="sr-only">
+                            Ventana de cobro para seleccionar métodos de pago y procesar la venta
+                        </DialogDescription>
                         <Badge variant="outline" className="text-xs font-medium py-0.5 px-2.5 bg-background border-border text-muted-foreground ml-1 shadow-2xs">
                             Tasa: <span className="font-semibold text-primary ml-1">Bs {formatCurrency(bcvRate)}</span>
                         </Badge>

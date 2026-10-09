@@ -29,6 +29,7 @@ import type { Product, ComboItem, UserProfile, ProductUnit } from "@/lib/types";
 import { useState, type ReactNode, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useFirebase, setDocumentNonBlocking, useCollection, useMemoFirebase, useDoc } from "@/firebase";
+import { useDashboardStore } from "@/contexts/dashboard-context";
 import { doc, collection, arrayUnion, query, limit } from "firebase/firestore";
 import { Check, ChevronsUpDown, Calculator, Smartphone, Barcode, Tag, Scale, Lock, Percent, Landmark, Gift, BadgePercent, Sparkles, RefreshCcw, Loader2 } from "lucide-react";
 import { format } from "date-fns";
@@ -111,15 +112,11 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
   const open = isOpen !== undefined ? isOpen : internalOpen;
   const setOpen = onOpenChange !== undefined ? onOpenChange : setInternalOpen;
 
-  const profileRef = useMemoFirebase(() => 
-    (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-    [firestore, user?.uid]
-  );
-  const { data: profile } = useDoc<UserProfile>(profileRef);
+  const { profile } = useDashboardStore();
 
   const inventorySettingsRef = useMemoFirebase(() => 
-    (firestore && user) ? doc(firestore, 'users', user.uid, 'settings', 'inventory') : null,
-    [firestore, user?.uid]
+    (firestore && user && open) ? doc(firestore, 'users', user.uid, 'settings', 'inventory') : null,
+    [firestore, user?.uid, open]
   );
   const { data: inventorySettings } = useDoc<any>(inventorySettingsRef);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Query,
   getDocs,
@@ -40,23 +40,63 @@ export interface InternalQuery extends Query<DocumentData> {
 }
 
 /**
- * Función para generar una clave de caché única basada en la consulta de Firestore.
+ * Extrae la ruta de forma segura sin lanzar excepciones si las propiedades privadas cambian.
+ */
+function getSafePath(query: any): string {
+    if (!query) return '';
+    try {
+        if (query.type === 'collection') {
+            return (query as CollectionReference).path || 'collection';
+        }
+        return (query as any)._query?.path?.canonicalString?.() 
+            || (query as any)._query?.path?.toString?.() 
+            || (query as any).path 
+            || 'unknown_path';
+    } catch {
+        return 'unknown_path';
+    }
+}
+
+/**
+ * Función para generar una clave de caché única basada en la consulta de Firestore de forma segura.
  */
 function getQueryCacheKey(query: any): string {
     if (!query) return '';
     try {
-        const path = query.type === 'collection' 
-            ? (query as CollectionReference).path 
-            : (query as unknown as InternalQuery)._query.path.canonicalString();
+        if (query.type === 'collection') {
+            return `collection_cache:${(query as CollectionReference).path}`;
+        }
         
+        const path = getSafePath(query);
+            
         const queryInternal = (query as any)._query || {};
-        const signature = JSON.stringify({
-            filters: queryInternal.filters || [],
-            orders: queryInternal.explicitOrderBy || [],
-            limit: queryInternal.limit || null
-        });
+        const limitVal = queryInternal.limit ?? 'none';
+        
+        let orderFields = '';
+        if (Array.isArray(queryInternal.explicitOrderBy)) {
+            orderFields = queryInternal.explicitOrderBy.map((o: any) => {
+                const field = o?.field?.canonicalString?.() || o?.field?.toString?.() || 'field';
+                const dir = o?.dir || 'asc';
+                return `${field}_${dir}`;
+            }).join('|');
+        }
 
-        return `collection_cache:${path}:${signature}`;
+        let filterSummary = '';
+        if (Array.isArray(queryInternal.filters)) {
+            filterSummary = queryInternal.filters.map((f: any) => {
+                const field = f?.field?.canonicalString?.() || f?.field?.toString?.() || 'field';
+                const op = f?.op || 'op';
+                let val = 'val';
+                if (typeof f?.value === 'string' || typeof f?.value === 'number' || typeof f?.value === 'boolean') {
+                    val = String(f.value);
+                } else if (Array.isArray(f?.value)) {
+                    val = `arr[${f.value.length}]`;
+                }
+                return `${field}_${op}_${val}`;
+            }).join('&');
+        }
+
+        return `collection_cache:${path}:limit_${limitVal}:orders_${orderFields}:filters_${filterSummary}`;
     } catch (e) {
         return 'unknown_query_key';
     }
@@ -71,6 +111,19 @@ export function useCollection<T = any>(
   type ResultItemType = WithId<T>;
   const { dataCache, setCachedData } = useDashboardStore();
   const { firestore, user } = useFirebase();
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    if (typeof window !== 'undefined' && user?.uid) {
+      try {
+        localStorage.removeItem(`last_sync_products_${user.uid}`);
+      } catch (e) {}
+    }
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [user?.uid]);
   
   const queryKey = useMemo(() => getQueryCacheKey(memoizedTargetRefOrQuery), [memoizedTargetRefOrQuery]);
   const data = (queryKey ? dataCache[queryKey] : null) as ResultItemType[] | null;
@@ -83,122 +136,59 @@ export function useCollection<T = any>(
     setCachedData(queryKey, newData);
   }, [queryKey, data, setCachedData]);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceServer = false) => {
     if (!memoizedTargetRefOrQuery || !queryKey || !firestore || !user) {
-      if (!memoizedTargetRefOrQuery) setIsLoading(false);
+      if (!memoizedTargetRefOrQuery && isMountedRef.current) setIsLoading(false);
       return;
     }
 
     // 1. VERIFICACIÓN RAM (Caché de nivel 1 - 0ms)
-    if (dataCache[queryKey] !== undefined && dataCache[queryKey] !== null) {
+    if (!forceServer && dataCache[queryKey] !== undefined && dataCache[queryKey] !== null) {
         return;
     }
 
-    setIsLoading(true);
-    setError(null);
+    if (isMountedRef.current) {
+      setIsLoading(true);
+      setError(null);
+    }
 
-    const path = memoizedTargetRefOrQuery.type === 'collection'
-        ? (memoizedTargetRefOrQuery as CollectionReference).path
-        : (memoizedTargetRefOrQuery as unknown as InternalQuery)._query.path.canonicalString();
+    const path = getSafePath(memoizedTargetRefOrQuery);
 
     try {
       let results: ResultItemType[] = [];
 
-      // 2. PATRÓN DE DOCUMENTO GUARDIÁN (Solo para Inventario)
-      if (path.includes('/products')) {
-          const syncKey = `last_sync_products_${user.uid}`;
-          const localTimestamp = localStorage.getItem(syncKey);
-          const guardianRef = doc(firestore, 'users', user.uid, 'metadata', 'inventory_status');
-
-          try {
-              // Consultamos solo 1 documento de metadatos (1 lectura)
-              const guardianSnap = await getDocFromServer(guardianRef);
-              const serverTimestamp = guardianSnap.exists() ? guardianSnap.data().lastUpdated : null;
-
-              if (serverTimestamp && localTimestamp === serverTimestamp) {
-                  // VERSIONES COINCIDEN: Carga instantánea desde disco local
-                  const cacheSnapshot = await getDocsFromCache(memoizedTargetRefOrQuery);
-                  cacheSnapshot.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-              } else if (serverTimestamp && localTimestamp) {
-                  // DELTA SYNC: Intentar descargar solo lo nuevo desde el último timestamp local
-                  try {
-                      const mergedMap = new Map<string, any>();
-                      
-                      // Cargar base desde caché (0 lecturas)
-                      const cacheSnap = await getDocsFromCache(memoizedTargetRefOrQuery);
-                      cacheSnap.forEach(d => mergedMap.set(d.id, d.data()));
-
-                      // Pedir solo el "Delta" (documentos modificados después de localTimestamp)
-                      const lastSyncDate = new Date(localTimestamp);
-                      const deltaQuery = query(memoizedTargetRefOrQuery, where('updatedAt', '>', lastSyncDate));
-                      const deltaSnap = await getDocsFromServer(deltaQuery);
-                      
-                      deltaSnap.forEach(d => mergedMap.set(d.id, d.data()));
-
-                      // Reconstruir lista filtrando eliminados
-                      results = Array.from(mergedMap.entries())
-                        .map(([id, data]) => ({ ...data, id }))
-                        .filter(p => !p.isDeleted);
-
-                      localStorage.setItem(syncKey, serverTimestamp);
-                  } catch (deltaErr) {
-                      // FALLBACK: Si falta índice o falla Delta, descarga completa de seguridad
-                      const fullSnap = await getDocsFromServer(memoizedTargetRefOrQuery);
-                      fullSnap.forEach(doc => {
-                          const p = doc.data() as any;
-                          if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                      });
-                      localStorage.setItem(syncKey, serverTimestamp);
-                  }
-              } else {
-                  // PRIMERA CARGA: Descarga completa inicial
-                  const serverSnapshot = await getDocsFromServer(memoizedTargetRefOrQuery);
-                  serverSnapshot.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-                  if (serverTimestamp) localStorage.setItem(syncKey, serverTimestamp);
-              }
-          } catch (guardianErr) {
-              // FALLBACK OFFLINE: Si falla el guardián, intentar caché y luego servidor
-              try {
-                  const snap = await getDocsFromCache(memoizedTargetRefOrQuery);
-                  snap.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-              } catch {
-                  const snap = await getDocsFromServer(memoizedTargetRefOrQuery);
-                  snap.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-              }
-          }
-      } else {
-          // 3. LOGICA ESTANDAR PARA OTRAS COLECCIONES
-          const snapshot = await getDocs(memoizedTargetRefOrQuery);
-          snapshot.forEach((doc) => {
-            results.push({ ...(doc.data() as T), id: doc.id });
-          });
-      }
-      
-      setCachedData(queryKey, results);
-    } catch (err: any) {
-      console.error("Fetch error:", err);
-      const contextualError = new FirestorePermissionError({
-        operation: 'list',
-        path,
+      // Carga directa y autoritativa desde Firestore
+      const snapshot = forceServer ? await getDocsFromServer(memoizedTargetRefOrQuery) : await getDocs(memoizedTargetRefOrQuery);
+      snapshot.forEach((doc) => {
+        const item = doc.data() as any;
+        if (!item.isDeleted) {
+          results.push({ ...item, id: doc.id });
+        }
       });
-      setError(contextualError);
-      errorEmitter.emit('permission-error', contextualError);
+      
+      if (isMountedRef.current) {
+        setCachedData(queryKey, results);
+      }
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        console.error("Fetch error:", err);
+        const contextualError = new FirestorePermissionError({
+          operation: 'list',
+          path,
+        });
+        setError(contextualError);
+        errorEmitter.emit('permission-error', contextualError);
+      }
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [memoizedTargetRefOrQuery, queryKey, dataCache, setCachedData, firestore, user]);
+
+  const refetch = useCallback(async () => {
+    await fetchData(true);
+  }, [fetchData]);
 
   useEffect(() => {
     fetchData();
@@ -208,5 +198,5 @@ export function useCollection<T = any>(
     throw new Error(memoizedTargetRefOrQuery + ' was not properly memoized using useMemoFirebase');
   }
 
-  return { data, isLoading, error, refetch: fetchData, mutate };
+  return { data, isLoading, error, refetch, mutate };
 }

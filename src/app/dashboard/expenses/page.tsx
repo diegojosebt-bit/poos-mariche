@@ -11,8 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useMemo } from "react";
-import { PlusCircle, Trash2, Receipt, Search, Calendar as CalendarIcon, X as ClearIcon, ArrowDownCircle, DollarSign, Landmark } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { PlusCircle, Trash2, Receipt, Search, Calendar as CalendarIcon, X as ClearIcon, ArrowDownCircle, DollarSign, Landmark, ChevronLeft, ChevronRight } from "lucide-react";
 import { format, parseISO, isWithinInterval, startOfDay, endOfDay, isValid } from "date-fns";
 import { es } from "date-fns/locale";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -47,6 +47,8 @@ function ExpensesContent() {
         from: startOfDay(new Date()),
         to: endOfDay(new Date()),
     });
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
 
     const expensesCollection = useMemoFirebase(() => 
         (firestore && user) ? query(collection(firestore, "users", user.uid, "expenses"), orderBy("createdAt", "desc")) : null,
@@ -71,6 +73,17 @@ function ExpensesContent() {
             return matchesSearch && matchesCategory && matchesDate;
         });
     }, [expenses, searchTerm, categoryFilter, dateRange]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, categoryFilter, dateRange]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE));
+
+    const paginatedExpenses = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filteredExpenses.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [filteredExpenses, currentPage, ITEMS_PER_PAGE]);
 
     const stats = useMemo(() => {
         let usd = 0;
@@ -201,9 +214,9 @@ function ExpensesContent() {
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow><TableCell colSpan={6} className="text-center py-10">Cargando...</TableCell></TableRow>
-                                ) : filteredExpenses.length === 0 ? (
+                                ) : paginatedExpenses.length === 0 ? (
                                     <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic uppercase font-bold text-xs opacity-50">No hay gastos en este periodo.</TableCell></TableRow>
-                                ) : filteredExpenses.map((ex) => {
+                                ) : paginatedExpenses.map((ex) => {
                                     const date = parseISO(ex.createdAt);
                                     return (
                                         <TableRow key={ex.id} className="hover:bg-muted/10">
@@ -238,6 +251,36 @@ function ExpensesContent() {
                             </TableBody>
                         </Table>
                     </CardContent>
+                    {filteredExpenses.length > 0 && (
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t bg-slate-50/50 text-xs text-muted-foreground">
+                            <div>
+                                Mostrando <span className="font-bold text-slate-800">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> a <span className="font-bold text-slate-800">{Math.min(currentPage * ITEMS_PER_PAGE, filteredExpenses.length)}</span> de <span className="font-bold text-slate-800">{filteredExpenses.length}</span> transacciones
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs font-bold"
+                                    disabled={currentPage === 1}
+                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                >
+                                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+                                </Button>
+                                <span className="font-bold text-slate-800 px-2">
+                                    Página {currentPage} de {totalPages}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs font-bold"
+                                    disabled={currentPage >= totalPages}
+                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                >
+                                    Siguiente <ChevronRight className="h-4 w-4 ml-1" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </Card>
             </main>
         </>

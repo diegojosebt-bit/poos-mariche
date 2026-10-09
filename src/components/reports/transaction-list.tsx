@@ -14,7 +14,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "../ui/skeleton";
 import { AdminAuthDialog } from "../admin-auth-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
-import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
+import { useFirebase } from "@/firebase";
+import { useDashboardStore } from "@/contexts/dashboard-context";
 import { doc, runTransaction, getDoc, type DocumentSnapshot } from "firebase/firestore";
 import { Badge } from "../ui/badge";
 import { Textarea } from "../ui/textarea";
@@ -248,12 +249,7 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
     const [methodFilter, setMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
     const [searchRef, setSearchRef] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
-
-    const profileRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile } = useDoc<UserProfile>(profileRef);
+    const { profile } = useDashboardStore();
 
     const onReprint = async (sale: Sale) => {
         let repairData = null;

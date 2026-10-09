@@ -13,6 +13,7 @@ import { AlertTriangle, Lock, LogOut, MessageCircle, Loader2 } from 'lucide-reac
 import { signOut } from 'firebase/auth';
 import { isAfter, parseISO, differenceInMinutes } from 'date-fns';
 import { GlobalAnnouncement } from '@/components/dashboard/global-announcement';
+import { SecurityUnlockedPill } from '@/components/security/security-unlocked-pill';
 import { RepairDraftPill } from '@/components/repairs/repair-draft-pill';
 import { DashboardProvider, useDashboardStore } from '@/contexts/dashboard-context';
 import { type ReactNode, useEffect, useState } from 'react';
@@ -109,21 +110,37 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
     const [isSettingsLoading, setIsSettingsLoading] = useState(true);
     const [isProfileLoading, setIsProfileLoading] = useState(true);
 
-    // 1. LISTENER DE PERFIL GLOBAL (Blindaje de Costos: 1 sola lectura para toda la App)
+    // 1. LISTENER ÚNICO DE PERFIL Y SESIÓN (Blindaje Máximo: 1 sola suscripción para toda la App)
     useEffect(() => {
-        if (!firestore || !user) return;
+        if (!firestore || !user || !auth) return;
         const pRef = doc(firestore, 'users', user.uid);
-        const unsubscribe = onSnapshot(pRef, (snap) => {
+        const unsubscribe = onSnapshot(pRef, async (snap) => {
             if (snap.exists()) {
-                setProfile({ ...snap.data(), id: snap.id } as UserProfile);
+                const data = snap.data();
+                setProfile({ ...data, id: snap.id } as UserProfile);
+
+                if (!snap.metadata.hasPendingWrites) {
+                    const localSessionId = localStorage.getItem(SESSION_KEY);
+                    if (!localSessionId && data.lastSessionId) {
+                        localStorage.setItem(SESSION_KEY, data.lastSessionId);
+                    } else if (localSessionId && data.lastSessionId && localSessionId !== data.lastSessionId) {
+                        localStorage.removeItem(SESSION_KEY);
+                        sessionStorage.removeItem('mm_security_unlocked');
+                        await signOut(auth);
+                        window.location.href = '/';
+                        return;
+                    }
+                }
             }
             setIsProfileLoading(false);
+            setIsSessionValidating(false);
         }, (err) => {
-            console.error("Profile sync error:", err);
+            console.error("Profile & session sync error:", err);
             setIsProfileLoading(false);
+            setIsSessionValidating(false);
         });
         return () => unsubscribe();
-    }, [firestore, user, setProfile]);
+    }, [firestore, user, auth, setProfile]);
 
     // 2. LISTENER DE CONFIGURACIÓN GLOBAL (Tasas/Márgenes)
     useEffect(() => {
@@ -137,40 +154,6 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
         });
         return () => unsubscribe();
     }, [firestore, user, setSettings]);
-
-    // 3. VIGILANTE DE SESIÓN ÚNICA
-    useEffect(() => {
-      if (!firestore || !user || !auth) return;
-
-      const unsubscribe = onSnapshot(doc(firestore, 'users', user.uid), async (snap) => {
-        if (snap.metadata.hasPendingWrites) {
-          setIsSessionValidating(false);
-          return;
-        }
-
-        if (snap.exists()) {
-          const data = snap.data();
-          const localSessionId = localStorage.getItem(SESSION_KEY);
-          
-          if (!localSessionId && data.lastSessionId) {
-            localStorage.setItem(SESSION_KEY, data.lastSessionId);
-          } 
-          else if (localSessionId && data.lastSessionId && localSessionId !== data.lastSessionId) {
-            localStorage.removeItem(SESSION_KEY);
-            sessionStorage.removeItem('mm_security_unlocked');
-            await signOut(auth);
-            window.location.href = '/';
-            return;
-          }
-        }
-        setIsSessionValidating(false);
-      }, (error) => {
-        console.error("Error vigilando sesión:", error);
-        setIsSessionValidating(false);
-      });
-
-      return () => unsubscribe();
-    }, [firestore, user, auth]);
 
     if (isProfileLoading || isSessionValidating || isSettingsLoading) {
         return (
@@ -196,6 +179,7 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
             <SidebarNav />
             <SidebarInset>
                 <GlobalAnnouncement />
+                <SecurityUnlockedPill />
                 <ExchangeRateReminder />
                 {children}
                 <RepairDraftPill />

@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs"
 import { TransactionList } from "./transaction-list"
 import { useCollection, useFirebase, useMemoFirebase } from "@/firebase"
 import { useMemo } from "react"
-import { collection, query, orderBy } from "firebase/firestore"
+import { collection, query, orderBy, limit } from "firebase/firestore"
 import { CashReconciliationDialog } from "./cash-reconciliation-dialog"
 import { ReconciliationHistory } from "./reconciliation-history"
 import { DateRangeReport } from "./date-range-report"
@@ -26,7 +26,7 @@ export function ReportsView({ sales, products, repairJobs, exchanges, fiados, is
     const { firestore, user } = useFirebase();
 
     const reconciliationsCollection = useMemoFirebase(() => 
-        (firestore && user) ? query(collection(firestore, "users", user.uid, "daily_reconciliations"), orderBy("closedAt", "desc")) : null,
+        (firestore && user) ? query(collection(firestore, "users", user.uid, "daily_reconciliations"), orderBy("closedAt", "desc"), limit(50)) : null,
         [firestore, user?.uid]
     );
     const { data: reconciliations, isLoading: reconciliationsLoading } = useCollection<DailyReconciliation>(reconciliationsCollection);

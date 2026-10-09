@@ -7,13 +7,11 @@ import { ScrollArea } from "../ui/scroll-area";
 import { useCurrency } from "@/hooks/use-currency";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "../ui/skeleton";
-import { TicketPercent, Search, PackagePlus, Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { TicketPercent, Search, Sparkles } from "lucide-react";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "../ui/button";
 import { useDebounce } from "use-debounce";
-import { useFirebase } from "@/firebase";
-import { collection, query, where, limit, getDocs } from "firebase/firestore";
 
 type ProductGridProps = {
   products: Product[];
@@ -22,16 +20,13 @@ type ProductGridProps = {
   mutateProducts: (updater: any) => void;
 };
 
-const ITEMS_PER_PAGE = 20;
+const ITEMS_PER_PAGE = 24;
 
 export function ProductGrid({ products, onProductSelect, isLoading, mutateProducts }: ProductGridProps) {
-  const { firestore, user } = useFirebase();
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearch] = useDebounce(searchTerm, 400);
+  const [debouncedSearch] = useDebounce(searchTerm, 300);
   const { format, getSymbol, getFinalPrice, convert } = useCurrency();
   const [currentPage, setCurrentPage] = useState(1);
-  const [isFallbackLoading, setIsFallbackLoading] = useState(false);
-  const [lastSearchedTerm, setLastSearchedTerm] = useState("");
 
   const categories = useMemo(() => {
     if (!products) return ['Todos'];
@@ -41,7 +36,7 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
 
   const [activeCategory, setActiveCategory] = useState('Todos');
 
-  // FILTRADO LOCAL (PASO 1 - 0 LECTURAS)
+  // FILTRADO EN MEMORIA RAM (0 LECTURAS, 0ms DE LATENCIA)
   const filteredProducts = useMemo(() => {
     if (!products) return [];
     const term = debouncedSearch.toLowerCase().trim();
@@ -57,46 +52,6 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
         )
     ).sort((a, b) => a.name.localeCompare(b.name));
   }, [products, activeCategory, debouncedSearch]);
-
-  // BÚSQUEDA BAJO DEMANDA (PASO 2 - FALLBACK DE 1 LECTURA)
-  useEffect(() => {
-    const term = debouncedSearch.trim().toLowerCase();
-    if (!firestore || !user || term.length < 3 || term === lastSearchedTerm) return;
-
-    // Solo consultamos a la nube si la memoria RAM no tiene resultados para este término
-    if (filteredProducts.length === 0 && !isLoading) {
-        const performFallbackSearch = async () => {
-            setIsFallbackLoading(true);
-            setLastSearchedTerm(term);
-            try {
-                // Buscamos por palabras clave en el índice global del servidor
-                const q = query(
-                    collection(firestore, 'users', user.uid, 'products'),
-                    where('searchKeywords', 'array-contains', term),
-                    limit(5)
-                );
-                
-                const snap = await getDocs(q);
-                if (!snap.empty) {
-                    const newProducts = snap.docs.map(d => ({ ...d.data(), id: d.id }) as Product);
-                    
-                    // INYECCIÓN EN MEMORIA GLOBAL
-                    mutateProducts((prev: Product[] | null) => {
-                        const existingIds = new Set((prev || []).map(p => p.id));
-                        const uniqueNew = newProducts.filter(p => !existingIds.has(p.id));
-                        return [...(prev || []), ...uniqueNew];
-                    });
-                }
-            } catch (e) {
-                console.error("Fallback search failed:", e);
-            } finally {
-                setIsFallbackLoading(false);
-            }
-        };
-
-        performFallbackSearch();
-    }
-  }, [debouncedSearch, filteredProducts.length, firestore, user, isLoading, mutateProducts, lastSearchedTerm]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -155,12 +110,6 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
                     onChange={(e) => setSearchTerm(e.target.value)}
                     autoFocus
                 />
-                {isFallbackLoading && (
-                    <div className="absolute right-2 top-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 border border-blue-100 animate-in fade-in duration-300">
-                        <Loader2 className="h-3 w-3 animate-spin text-blue-600" />
-                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-tighter">Buscando...</span>
-                    </div>
-                )}
             </div>
         </div>
 
@@ -240,17 +189,19 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
             </div>
           </ScrollArea>
         </div>
-         {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-3 flex-shrink-0 bg-white/80 backdrop-blur-sm mt-auto border-t">
-                <span className="text-[9px] text-muted-foreground font-black uppercase">
-                    Pág. {currentPage} / {totalPages}
+        <div className="flex items-center justify-between pt-2.5 flex-shrink-0 bg-white/80 backdrop-blur-sm mt-auto border-t gap-2">
+            <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground font-semibold">
+                    Pág. <strong className="text-foreground">{currentPage}</strong> de {totalPages} ({filteredProducts.length} producto{filteredProducts.length === 1 ? '' : 's'})
                 </span>
-                <div className="flex gap-1">
-                    <Button variant="outline" size="sm" className="h-6 text-[9px] px-2 font-bold" onClick={handlePreviousPage} disabled={currentPage === 1}>Anterior</Button>
-                    <Button variant="outline" size="sm" className="h-6 text-[9px] px-2 font-bold" onClick={handleNextPage} disabled={currentPage >= totalPages}>Siguiente</Button>
-                </div>
             </div>
-        )}
+            {totalPages > 1 && (
+                <div className="flex gap-1.5">
+                    <Button variant="outline" size="sm" className="h-7 text-xs px-2.5 font-medium" onClick={handlePreviousPage} disabled={currentPage === 1}>Anterior</Button>
+                    <Button variant="outline" size="sm" className="h-7 text-xs px-2.5 font-medium" onClick={handleNextPage} disabled={currentPage >= totalPages}>Siguiente</Button>
+                </div>
+            )}
+        </div>
     </div>
   );
 }

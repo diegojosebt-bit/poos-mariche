@@ -1,5 +1,6 @@
 "use client"
 
+import { safeJsonStringify, cleanObject } from "@/lib/json-guard"
 import type { ColumnDef } from "@tanstack/react-table"
 import type { RepairJob, RepairStatus, UserProfile, Product, ReservedPart, Sale } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -34,7 +35,6 @@ import { AdminAuthDialog } from "../admin-auth-dialog"
 import { useState, type ReactNode, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
-import { RepairFormDialog } from "./repair-form-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog"
 import { useDashboardStore } from "@/contexts/dashboard-context"
 
@@ -175,23 +175,34 @@ function RepairHistoryDialog({ repairJob, children }: { repairJob: RepairJob, ch
 const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) => {
     const { toast } = useToast();
     const { firestore, user } = useFirebase();
-    const { removeCachedItem } = useDashboardStore();
+    const { removeCachedItem, profile } = useDashboardStore();
     const router = useRouter();
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const { bcvRate, parallelRate } = useCurrency();
-    
-    const profileRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile } = useDoc<UserProfile>(profileRef);
 
     const estimatedCost = repairJob.estimatedCost || 0;
     const amountPaid = repairJob.amountPaid || 0;
     const remainingBalance = estimatedCost - amountPaid;
 
     const handlePay = () => {
-        const repairData = encodeURIComponent(JSON.stringify(repairJob));
+        const cleanJob = cleanObject({
+            id: repairJob.id,
+            customerName: repairJob.customerName,
+            customerPhone: repairJob.customerPhone,
+            customerID: repairJob.customerID,
+            deviceMake: repairJob.deviceMake,
+            deviceModel: repairJob.deviceModel,
+            reportedIssue: repairJob.reportedIssue,
+            estimatedCost: repairJob.estimatedCost,
+            amountPaid: repairJob.amountPaid,
+            isPaid: repairJob.isPaid,
+            status: repairJob.status,
+            createdAt: repairJob.createdAt,
+            isPromo: repairJob.isPromo,
+            reservedParts: repairJob.reservedParts,
+            consumedParts: repairJob.consumedParts
+        });
+        const repairData = encodeURIComponent(safeJsonStringify(cleanJob));
         router.push(`/dashboard/pos?repairJob=${repairData}`);
     };
 
@@ -300,7 +311,7 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                     <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                     
                     {remainingBalance > 0.001 && !repairJob.isPaid && (
-                         <DropdownMenuItem onSelect={handlePay} className="text-green-600 font-bold">
+                         <DropdownMenuItem onSelect={() => handlePay()} className="text-green-600 font-bold">
                             <DollarSign className="mr-2 h-4 w-4" />
                             Cobrar Saldo
                         </DropdownMenuItem>
@@ -313,32 +324,30 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                         </DropdownMenuItem>
                     </RepairHistoryDialog>
 
-                    <RepairFormDialog repairJob={repairJob} onSaved={handleOptimisticUpdate}>
-                        <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                             <Edit className="mr-2 h-4 w-4" />
-                            Editar / Detalles
-                        </DropdownMenuItem>
-                    </RepairFormDialog>
+                    <DropdownMenuItem onSelect={() => (table.options.meta as any)?.onEditRepair?.(repairJob)}>
+                        <Edit className="mr-2 h-4 w-4" />
+                        Editar / Detalles
+                    </DropdownMenuItem>
                     
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel className="text-[10px] font-black uppercase text-muted-foreground tracking-tighter">Opciones de Impresión</DropdownMenuLabel>
                     
-                    <DropdownMenuItem onSelect={onPrintAll}>
+                    <DropdownMenuItem onSelect={() => onPrintAll()}>
                         <Printer className="mr-2 h-4 w-4 text-primary" />
                         Imprimir Todo (3)
                     </DropdownMenuItem>
                     
-                    <DropdownMenuItem onSelect={onPrintCustomer}>
+                    <DropdownMenuItem onSelect={() => onPrintCustomer()}>
                         <FileText className="mr-2 h-4 w-4 opacity-50" />
                         Nota de Entrega
                     </DropdownMenuItem>
                     
-                    <DropdownMenuItem onSelect={onPrintInternal}>
+                    <DropdownMenuItem onSelect={() => onPrintInternal()}>
                         <StickyNote className="mr-2 h-4 w-4 opacity-50" />
                         Control Interno
                     </DropdownMenuItem>
                     
-                    <DropdownMenuItem onSelect={onPrintSticker}>
+                    <DropdownMenuItem onSelect={() => onPrintSticker()}>
                         <Tag className="mr-2 h-4 w-4 opacity-50" />
                         Etiqueta de Equipo
                     </DropdownMenuItem>
@@ -352,10 +361,6 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                     </AdminAuthDialog>
                 </DropdownMenuContent>
             </DropdownMenu>
-
-            <RepairFormDialog repairJob={repairJob} onSaved={handleOptimisticUpdate}>
-                <button id={`edit-trigger-${repairJob.id}`} style={{ display: 'none' }}></button>
-            </RepairFormDialog>
 
              <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <AlertDialogContent>
@@ -533,7 +538,7 @@ export const columns: ColumnDef<RepairJob>[] = [
     header: () => <div className="text-right">Pagado</div>,
     cell: function Cell({ row }) {
       const { format, getSymbol } = useCurrency();
-      const amount = parseFloat(row.getValue("amountPaid") || 0)
+      const amount = parseFloat(String(row.getValue("amountPaid") || 0))
       return <div className="text-right font-medium text-green-600 text-xs">{getSymbol()}{format(amount)}</div>
     },
   },

@@ -93,7 +93,7 @@ export function ReceiptView({ sale, currency, businessName, profile, repairData 
                             {hasDiscount && (
                                 <div className="flex-row-between text-[7pt] italic">
                                     <span className="pl-2">Descuento aplicado:</span>
-                                    <span>-{formatCurrency(item.discount * item.quantity, 'USD')}</span>
+                                    <span>-{formatCurrency((item.discount || 0) * item.quantity, 'USD')}</span>
                                 </div>
                             )}
                         </div>

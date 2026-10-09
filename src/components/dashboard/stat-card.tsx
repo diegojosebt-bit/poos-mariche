@@ -36,7 +36,7 @@ export default function StatCard({ title, value, icon, description, href, isLoad
     );
 
     if (href) {
-        return <Link href={href}>{cardContent}</Link>;
+        return <Link href={href} scroll={false}>{cardContent}</Link>;
     }
 
     return cardContent;

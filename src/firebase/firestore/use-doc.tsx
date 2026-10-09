@@ -42,6 +42,8 @@ export function useDoc<T = any>(
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
     if (!memoizedDocRef) {
       setData(null);
       setIsLoading(false);
@@ -55,6 +57,7 @@ export function useDoc<T = any>(
     const unsubscribe = onSnapshot(
       memoizedDocRef,
       (snapshot) => {
+        if (!isMounted) return;
         if (snapshot.exists()) {
           setData({ ...(snapshot.data() as T), id: snapshot.id });
         } else {
@@ -63,10 +66,11 @@ export function useDoc<T = any>(
         setIsLoading(false);
       },
       (err: any) => {
+        if (!isMounted) return;
         console.error("Firestore Doc Listener Error:", err);
         const contextualError = new FirestorePermissionError({
           operation: 'get',
-          path: memoizedDocRef.path,
+          path: memoizedDocRef.path || 'doc',
         });
         setError(contextualError);
         errorEmitter.emit('permission-error', contextualError);
@@ -75,7 +79,10 @@ export function useDoc<T = any>(
     );
 
     // Limpieza al desmontar el componente
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, [memoizedDocRef]);
 
   return { data, isLoading, error, refetch, mutate };

@@ -11,8 +11,9 @@ import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
-import { useDoc, useFirebase, useMemoFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, useCollection } from "@/firebase";
-import { doc, collection } from "firebase/firestore";
+import { useFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, useMemoFirebase } from "@/firebase";
+import { useDashboardStore } from "@/contexts/dashboard-context";
+import { doc, collection, getDocs } from "firebase/firestore";
 import { useEffect, useState, useMemo } from "react";
 import type { AppSettings, UserProfile, Product, UserModule } from "@/lib/types";
 import { Switch } from "@/components/ui/switch";
@@ -74,6 +75,16 @@ function SettingsContent() {
     const [isSavingSettings, setIsSavingSettings] = useState(false);
     const [isFetchingOfficialRate, setIsFetchingOfficialRate] = useState(false);
 
+    const settingsRef = useMemoFirebase(() => 
+        (firestore && user) ? doc(firestore, 'users', user.uid, 'app-settings', 'main') : null, 
+        [firestore, user?.uid]
+    );
+
+    const userProfileRef = useMemoFirebase(() => 
+        (firestore && user) ? doc(firestore, 'users', user.uid) : null, 
+        [firestore, user?.uid]
+    );
+
     const handleFetchOfficialRateInSettings = async () => {
         setIsFetchingOfficialRate(true);
         try {
@@ -96,20 +107,7 @@ function SettingsContent() {
         }
     };
     
-    const settingsRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid, 'app-settings', 'main') : null,
-        [firestore, user?.uid]
-    );
-    const { data: settings } = useDoc<AppSettings>(settingsRef);
-
-    const userProfileRef = useMemoFirebase(() =>
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile } = useDoc<UserProfile>(userProfileRef);
-
-    const productsCol = useMemoFirebase(() => (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null, [firestore, user?.uid]);
-    const { data: products } = useCollection<Product>(productsCol);
+    const { settings, profile, dataCache } = useDashboardStore();
 
     const settingsForm = useForm<z.infer<typeof settingsSchema>>({
         resolver: zodResolver(settingsSchema),
@@ -203,13 +201,29 @@ function SettingsContent() {
         finally { setIsUpdatingPin(false); }
     };
 
-    const handleExportInventory = () => {
-        if (!products) return;
-        const worksheet = XLSX.utils.json_to_sheet(products);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
-        XLSX.writeFile(workbook, "inventario.xlsx");
-        toast({ title: "Inventario Exportado" });
+    const handleExportInventory = async () => {
+        if (!firestore || !user) return;
+        try {
+            let prods: Product[] = [];
+            const cacheKey = Object.keys(dataCache).find(k => k.includes('/products'));
+            if (cacheKey && dataCache[cacheKey]) {
+                prods = dataCache[cacheKey] as Product[];
+            } else {
+                const snap = await getDocs(collection(firestore, 'users', user.uid, 'products'));
+                prods = snap.docs.map(d => ({ ...d.data(), id: d.id }) as Product);
+            }
+            if (prods.length === 0) {
+                toast({ title: "No hay productos para exportar" });
+                return;
+            }
+            const worksheet = XLSX.utils.json_to_sheet(prods);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
+            XLSX.writeFile(workbook, "inventario.xlsx");
+            toast({ title: "Inventario Exportado" });
+        } catch (e) {
+            toast({ variant: "destructive", title: "Error al exportar inventario" });
+        }
     };
 
     const handleExportSettings = () => {

@@ -1,15 +1,16 @@
 "use client";
 
-import React, { Suspense, useState, useMemo, useEffect } from 'react';
+import React, { Suspense, useState, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
-import { PlusCircle, Trash2, Calculator, Clock } from "lucide-react";
+import { PlusCircle, Trash2, Calculator, Clock, RefreshCw } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 import { columns } from "@/components/inventory/columns";
-import type { Product, UserProfile } from '@/lib/types';
+import type { Product } from '@/lib/types';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCollection, useFirebase, useMemoFirebase, useDoc } from '@/firebase';
-import { collection, writeBatch, doc, query, limit, orderBy } from 'firebase/firestore';
+import { useCollection, useFirebase, useMemoFirebase } from '@/firebase';
+import { useDashboardStore } from '@/contexts/dashboard-context';
+import { collection, writeBatch, doc } from 'firebase/firestore';
 import type { Table as TanstackTable, FilterFn } from '@tanstack/react-table';
 import {
   AlertDialog,
@@ -27,6 +28,7 @@ import { PrintLabelsButton } from '@/components/inventory/print-labels-button';
 import { PriceCalculatorDialog } from '@/components/tools/price-calculator-dialog';
 import { ProductFormDialog } from '@/components/inventory/product-form-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { differenceInDays, parseISO } from 'date-fns';
 import { cn } from "@/lib/utils";
 import { SecurityGate } from "@/components/security-gate";
@@ -107,19 +109,17 @@ function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
 function InventoryContent() {
     const { firestore, user } = useFirebase();
     
-    const profileRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile } = useDoc<UserProfile>(profileRef);
+    const { profile } = useDashboardStore();
     
-    // ESTANDARIZADO: Límite 200 para compartir cache con el POS
+    // CARGA COMPLETA DE CATÁLOGO: Misma referencia de colección para compartir la caché en RAM a 0ms
     const productsCollection = useMemoFirebase(() =>
-        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'products'), orderBy('name'), limit(200)) : null,
+        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null,
         [firestore, user?.uid]
     );
-    const { data: products, isLoading, mutate: mutateProducts } = useCollection<Product>(productsCollection);
+    const { data: products, isLoading, mutate: mutateProducts, refetch: refetchProducts } = useCollection<Product>(productsCollection);
 
+    const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out' | 'old'>('all');
     const [categoryFilter, setCategoryFilter] = useState('all');
 
@@ -199,21 +199,60 @@ function InventoryContent() {
                     columns={tableColumns} 
                     data={filteredProducts}
                     isLoading={isLoading}
-                    filterPlaceholder="Buscar productos..."
-                    meta={{ allProducts: products || [], showAging, showRepairs, mutate: mutateProducts }}
+                    filterPlaceholder="Buscar productos en inventario..."
+                    meta={{ 
+                        allProducts: products || [], 
+                        showAging, 
+                        showRepairs, 
+                        mutate: mutateProducts,
+                        onEditProduct: (p: Product) => {
+                            setEditingProduct(p);
+                            setIsEditDialogOpen(true);
+                        }
+                    }}
                     globalFilterFn={productFilterFn}
                 >
                     {(table) => (
                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                                <SelectTrigger className="w-full sm:w-[160px] h-9 text-xs"><SelectValue placeholder="Categoría" /></SelectTrigger>
-                                <SelectContent>{categories.map(c => <SelectItem key={c} value={c} className="text-xs">{c === 'all' ? 'Todas' : c}</SelectItem>)}</SelectContent>
+                                 <SelectTrigger className="w-full sm:w-[160px] h-9 text-xs"><SelectValue placeholder="Categoría" /></SelectTrigger>
+                                 <SelectContent>{categories.map(c => <SelectItem key={c} value={c} className="text-xs">{c === 'all' ? 'Todas' : c}</SelectItem>)}</SelectContent>
                             </Select>
                             <PrintLabelsButton table={table} />
                             <BulkDeleteButton table={table} />
                         </div>
                     )}
                 </DataTable>
+
+                <div className="mt-4 p-3 bg-muted/30 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <span className="text-muted-foreground font-medium">
+                            Total en inventario: <strong className="text-foreground">{products?.length || 0}</strong> productos ({filteredProducts.length} visibles)
+                        </span>
+                    </div>
+                    <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => refetchProducts()} 
+                        disabled={isLoading}
+                        className="h-8 text-xs font-semibold gap-1.5"
+                    >
+                        <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
+                        Sincronizar catálogo
+                    </Button>
+                </div>
+
+                {editingProduct && (
+                    <ProductFormDialog 
+                        product={editingProduct} 
+                        isOpen={isEditDialogOpen} 
+                        onOpenChange={(open) => {
+                            setIsEditDialogOpen(open);
+                            if (!open) setEditingProduct(null);
+                        }}
+                        onSaved={handleOptimisticUpdate}
+                    />
+                )}
             </main>
         </>
     );

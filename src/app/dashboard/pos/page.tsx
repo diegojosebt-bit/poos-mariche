@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking } from "@/firebase";
 import { collection, doc, query, limit, orderBy } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { Calculator } from "lucide-react";
+import { Calculator, RefreshCw } from "lucide-react";
 import { HeldSalesSheet } from "@/components/pos/held-sales-sheet";
 import { PriceCalculatorDialog } from "@/components/tools/price-calculator-dialog";
 import { CustomItemDialog } from "@/components/pos/custom-item-dialog";
@@ -27,12 +27,12 @@ function POSContent() {
     const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
     const { addItemToCache } = useDashboardStore();
 
-    // ESTANDARIZADO: Límite 200 productos para compartir cache global
+    // CARGA COMPLETA DE CATÁLOGO: Descarga una sola vez y reutiliza en memoria RAM con 0 lecturas adicionales
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'products'), orderBy('name'), limit(200)) : null,
+        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null,
         [firestore, user?.uid]
     );
-    const { data: products, isLoading: productsLoading, mutate: mutateProducts } = useCollection<Product>(productsCollection);
+    const { data: products, isLoading: productsLoading, mutate: mutateProducts, refetch: refetchProducts } = useCollection<Product>(productsCollection);
     
     const heldSalesCollection = useMemoFirebase(() => 
         (firestore && user) ? collection(firestore, 'users', user.uid, 'held_sales') : null,

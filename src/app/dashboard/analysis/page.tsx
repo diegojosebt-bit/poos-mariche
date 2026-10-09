@@ -24,7 +24,7 @@ function AnalysisContent() {
         (firestore && user) ? query(
             collection(firestore, "users", user.uid, "products"), 
             orderBy("name"), 
-            limit(200)
+            limit(50)
         ) : null, 
         [firestore, user?.uid]
     );
