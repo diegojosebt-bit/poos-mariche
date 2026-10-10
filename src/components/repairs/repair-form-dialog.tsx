@@ -409,9 +409,12 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                 finalReservedParts = [];
             }
 
+            const calculatedPartsCost = [...finalReservedParts, ...finalConsumedParts].reduce((sum, p) => sum + (Number(p.costPrice || 0) * Number(p.quantity || 1)), 0);
+
             const finalData = cleanObject({ 
                 ...values, id: jobId, 
                 estimatedCost: Number(estimatedTotal.toFixed(2)),
+                partsCost: Number(calculatedPartsCost.toFixed(2)),
                 amountPaid: currentPaid, isPaid: currentPaid >= (estimatedTotal - 0.01),
                 status: (currentPaid >= (estimatedTotal - 0.01) && values.status === 'Pendiente') ? 'Pagado' : values.status,
                 createdAt: repairJob?.createdAt || new Date().toISOString(),

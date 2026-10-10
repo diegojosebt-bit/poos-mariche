@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { RepairFormDialog } from "@/components/repairs/repair-form-dialog";
+import { ExportRepairsDialog } from "@/components/repairs/export-repairs-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FilterFn } from "@tanstack/react-table";
 import { SecurityGate } from "@/components/security-gate";
@@ -120,6 +121,7 @@ function RepairsContent() {
                     isLoading={isLoading}
                     filterPlaceholder="Buscar cliente o equipo..."
                     globalFilterFn={repairFilterFn}
+                    searchAddon={<ExportRepairsDialog repairs={repairJobs || []} />}
                     meta={{ 
                         mutate: mutateRepairs,
                         onEditRepair: (job: RepairJob) => {

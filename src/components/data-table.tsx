@@ -41,6 +41,7 @@ interface DataTableProps<TData, TValue> {
   meta?: any;
   onGlobalFilterChange?: (filterValue: string, filteredCount: number) => void;
   isServerSearching?: boolean;
+  searchAddon?: React.ReactNode;
 }
 
 export function DataTable<TData, TValue>({
@@ -52,7 +53,8 @@ export function DataTable<TData, TValue>({
   globalFilterFn,
   meta,
   onGlobalFilterChange,
-  isServerSearching = false
+  isServerSearching = false,
+  searchAddon
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -96,21 +98,24 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="relative max-w-sm w-full">
-              <Input
-                  placeholder={filterPlaceholder}
-                  value={globalFilter ?? ""}
-                  onChange={(event) =>
-                      setGlobalFilter(event.target.value)
-                  }
-                  className="pr-8"
-              />
-              {isServerSearching && (
-                <div className="absolute right-2.5 top-2.5 text-primary">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                </div>
-              )}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+            <div className="flex items-center gap-2 max-w-sm w-full">
+              <div className="relative flex-1">
+                <Input
+                    placeholder={filterPlaceholder}
+                    value={globalFilter ?? ""}
+                    onChange={(event) =>
+                        setGlobalFilter(event.target.value)
+                    }
+                    className="pr-8"
+                />
+                {isServerSearching && (
+                  <div className="absolute right-2.5 top-2.5 text-primary">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                )}
+              </div>
+              {searchAddon}
             </div>
              {children && children(table)}
         </div>
