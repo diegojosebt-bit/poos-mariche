@@ -71,7 +71,7 @@
     "typescript": "^5.5.2"
   },
   "engines": {
-    "node": "^20.14.9"
+    "node": ">=20.x"
   },
   "overrides": {
     "react": "18.3.1",
