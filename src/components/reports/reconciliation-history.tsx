@@ -18,8 +18,8 @@ import { useState, useMemo, useEffect } from "react";
 import type { DateRange } from "react-day-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Calendar } from "../ui/calendar";
-import { useFirebase } from "@/firebase";
-import { useDashboardStore } from "@/contexts/dashboard-context";
+import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
+import { doc } from "firebase/firestore";
 
 type ReconciliationHistoryProps = {
   reconciliations: DailyReconciliation[];
@@ -36,7 +36,12 @@ export function ReconciliationHistory({ reconciliations, isLoading }: Reconcilia
   const { firestore, user } = useFirebase();
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [currentPage, setCurrentPage] = useState(1);
-  const { profile } = useDashboardStore();
+
+  const profileRef = useMemoFirebase(() => 
+    (firestore && user) ? doc(firestore, 'users', user.uid) : null,
+    [firestore, user?.uid]
+  );
+  const { data: profile } = useDoc<UserProfile>(profileRef);
 
   const onPrint = (reconciliation: DailyReconciliation) => {
     handlePrintReconciliation({ 

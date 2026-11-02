@@ -1,6 +1,5 @@
 "use client";
 
-import { cleanObject } from "@/lib/json-guard";
 import type { CartItem, Payment, Product, Sale, RepairJob, ReservedPart } from "@/lib/types";
 import { Button } from "../ui/button";
 import { Trash2, TicketPercent, Gift, ParkingSquare, UserPlus, UserX, UserCheck, Search, BadgePercent, Tag } from "lucide-react";
@@ -22,10 +21,28 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { useDashboardStore } from "@/contexts/dashboard-context";
+import { getNextFiscalCounter } from "@/lib/fiscal-helpers";
 
 function generateSaleId() {
     const date = new Date();
     return `S-${format(date, "yyMMdd")}-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+function cleanObject(obj: any): any {
+    if (obj === null || obj === undefined) return obj;
+    const cleaned = { ...obj };
+    Object.keys(cleaned).forEach(key => {
+        if (cleaned[key] === undefined) {
+            delete cleaned[key];
+        } else if (Array.isArray(cleaned[key])) {
+            cleaned[key] = cleaned[key].map((item: any) => 
+                (typeof item === 'object' && item !== null) ? cleanObject(item) : item
+            );
+        } else if (typeof cleaned[key] === 'object' && cleaned[key] !== null) {
+            cleaned[key] = cleanObject(cleaned[key]);
+        }
+    });
+    return cleaned;
 }
 
 function CustomerDialog({ onSave, currentName, currentID, sales }: { onSave: (name: string, id: string) => void, currentName: string, currentID: string, sales: Sale[] }) {
@@ -71,7 +88,7 @@ function CustomerDialog({ onSave, currentName, currentID, sales }: { onSave: (na
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle className="uppercase font-bold">Datos del Cliente</DialogTitle>
-                    <DialogDescription>Estos datos aparecerán en la nota de venta y el comprobante.</DialogDescription>
+                    <DialogDescription>Estos datos aparecerán en la factura y el reporte de ventas.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
                     <div className="space-y-1.5">
@@ -167,20 +184,6 @@ function DiscountItemControl({ productId, currentDiscount, onApply }: { productI
     );
 }
 
-export interface CartDisplayProps {
-  cart: CartItem[];
-  allProducts: Product[];
-  onUpdateQuantity: (productId: string, quantity: number) => void;
-  onUpdateDiscount: (productId: string, discount: number) => void;
-  onRemoveItem: (productId: string, isRepair?: boolean) => void;
-  onClearCart: () => void;
-  onTogglePromo: (productId: string) => void;
-  onToggleGift: (productId: string) => void;
-  onHoldSale?: (name: string, customerName?: string, customerID?: string) => void;
-  onCheckoutSuccess?: (sale: Sale, consumedParts?: ReservedPart[]) => void;
-  repairJobId?: string | null;
-}
-
 export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDiscount, onRemoveItem, onClearCart, repairJobId, onTogglePromo, onToggleGift, onHoldSale, onCheckoutSuccess }: CartDisplayProps) {
   const { firestore, user } = useFirebase();
   const { toast } = useToast();
@@ -242,7 +245,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
 
   const hasPromo = cart.some(i => i.isPromo);
 
-  const handleCheckout = async (payments: Payment[], changeGiven: Payment[], totalChangeInUSD: number): Promise<Sale | null> => {
+  const handleCheckout = async (payments: Payment[], changeGiven: Payment[], totalChangeInUSD: number, isFiscal: boolean = false): Promise<Sale | null> => {
       if (!firestore || !user) return null;
 
       const saleId = generateSaleId();
@@ -253,7 +256,8 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
           return { 
               ...item, 
               price: getPrice(item),
-              costPrice: finalCost
+              costPrice: finalCost,
+              isExempt: !(product?.hasIVA)
           };
       });
 
@@ -271,6 +275,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
         const partsToNotify = activeRepairJob?.reservedParts || [];
         let repairUpdateForCache: any = null;
         let finalGlobalTransactionCost = 0;
+        let fiscalMetadata: any = null;
 
         await runTransaction(firestore, async (transaction) => {
             const productIdsToGet = new Set<string>();
@@ -291,6 +296,17 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
             const statsRef = doc(firestore, 'users', user.uid, 'system', 'estadisticas_actuales');
             const statsSnap = await transaction.get(statsRef);
             const currentStats = statsSnap.exists() ? statsSnap.data() : { totalRealSales30d: 0, totalRealProfit30d: 0 };
+
+            if (isFiscal) {
+                const { invoiceNumber, controlNumber } = await getNextFiscalCounter(transaction, firestore, user.uid);
+                fiscalMetadata = {
+                    invoiceNumber,
+                    controlNumber,
+                    bcvRate: bcvRate,
+                    ivaPercent: 16,
+                    igtfPercent: 3
+                };
+            }
 
             let totalCostUSD = 0;
             const stockDeductions = new Map<string, { stock: number, reserved: number, salesCount: number }>();
@@ -396,34 +412,29 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                 items: cartWithPrices,
                 customerName: customerName || null,
                 customerID: customerID || null,
-                subtotal: total, 
-                discount: 0, 
-                totalAmount: total,
+                subtotal: total, discount: 0, totalAmount: total,
                 costPrice: Number(totalCostUSD.toFixed(2)), 
                 paymentMethod: payments.map(p => p.method).join(', '),
                 transactionDate: new Date().toISOString(),
-                payments, 
-                status: 'completed',
+                payments, status: 'completed',
                 repairJobId: (repairJobId && hasRepairInCart) ? repairJobId : null,
                 ...(changeGiven.length > 0 && { changeGiven, totalChangeInUSD }),
                 actualPaidAmount: actualNetPaidInUSD,
                 bcvRateAtTime: bcvRate,
                 parallelRateAtTime: parallelRate,
+                isFiscal,
+                docType: isFiscal ? 'FISCAL_INVOICE' : 'DELIVERY_NOTE',
+                fiscalMetadata
             });
 
             transaction.set(saleRef, saleData);
-
-            const guardianRef = doc(firestore, 'users', user.uid, 'metadata', 'inventory_status');
-            transaction.set(guardianRef, {
-                lastUpdated: new Date().toISOString()
-            }, { merge: true });
         });
 
         if (repairJobId && repairUpdateForCache) {
             updateCachedItem(repairJobId, repairUpdateForCache);
         }
 
-        toast({ title: "Venta Registrada con Éxito" });
+        toast({ title: isFiscal ? "Factura Fiscal Generada Exitosamente" : "Venta Completada con Éxito" });
         
         const resultSale = { 
             id: saleId, 
@@ -442,6 +453,9 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
             repairJobId: (repairJobId && hasRepairInCart) ? repairJobId : null,
             bcvRateAtTime: bcvRate,
             parallelRateAtTime: parallelRate,
+            isFiscal,
+            docType: isFiscal ? 'FISCAL_INVOICE' : 'DELIVERY_NOTE',
+            fiscalMetadata
         } as Sale;
 
         if (onCheckoutSuccess) {

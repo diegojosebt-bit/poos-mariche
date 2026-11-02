@@ -1,7 +1,6 @@
 
 "use client";
 
-import { safeJsonStringify, cleanObject } from "@/lib/json-guard";
 import { Button } from "@/components/ui/button";
 import type { RepairJob } from "@/lib/types";
 import { DollarSign } from "lucide-react";
@@ -15,24 +14,7 @@ export function PayRepairButton({ repairJob }: PayRepairButtonProps) {
     const router = useRouter();
 
     const handlePay = () => {
-        const cleanJob = cleanObject({
-            id: repairJob.id,
-            customerName: repairJob.customerName,
-            customerPhone: repairJob.customerPhone,
-            customerID: repairJob.customerID,
-            deviceMake: repairJob.deviceMake,
-            deviceModel: repairJob.deviceModel,
-            reportedIssue: repairJob.reportedIssue,
-            estimatedCost: repairJob.estimatedCost,
-            amountPaid: repairJob.amountPaid,
-            isPaid: repairJob.isPaid,
-            status: repairJob.status,
-            createdAt: repairJob.createdAt,
-            isPromo: repairJob.isPromo,
-            reservedParts: repairJob.reservedParts,
-            consumedParts: repairJob.consumedParts
-        });
-        const repairData = encodeURIComponent(safeJsonStringify(cleanJob));
+        const repairData = encodeURIComponent(JSON.stringify(repairJob));
         router.push(`/dashboard/pos?repairJob=${repairData}`);
     };
     

@@ -12,18 +12,18 @@ import { useMemo } from "react";
 export default function DashboardPage() {
     const { firestore, user } = useFirebase();
 
-    // VENTAS - Usamos la consulta estándar para aprovechar el cache global (0 Lecturas si ya cargó Reportes)
+    // VENTAS - Estandarizado a 100 para compartir cache con Reportes y Tesorería (0 Lecturas al navegar)
     const salesCollection = useMemoFirebase(() => 
         (firestore && user) ? query(
             collection(firestore, "users", user.uid, "sale_transactions"),
             orderBy("transactionDate", "desc"),
-            limit(50)
+            limit(100)
         ) : null, 
         [firestore, user?.uid]
     );
     const { data: allSales, isLoading: salesLoading } = useCollection<Sale>(salesCollection);
 
-    // REPARACIONES - Usamos la consulta estándar para aprovechar el cache global (0 Lecturas si ya cargó Reparaciones)
+    // REPARACIONES - Estandarizado a 100 para compartir cache global
     const repairJobsCollection = useMemoFirebase(() =>
         (firestore && user) ? query(
             collection(firestore, "users", user.uid, "repair_jobs"),
@@ -34,7 +34,7 @@ export default function DashboardPage() {
     );
     const { data: allRepairs, isLoading: repairsLoading } = useCollection<RepairJob>(repairJobsCollection);
 
-    // FILTRADO LOCAL (0 LECTURAS): Procesamos el mes actual en el cliente
+    // FILTRADO LOCAL (0 LECTURAS): Procesamos el mes actual en el cliente aprovechando el bloque de 100 registros
     const { sales, repairJobs } = useMemo(() => {
         const startOfCurrentMonth = startOfMonth(new Date());
         

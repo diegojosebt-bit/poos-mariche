@@ -38,9 +38,9 @@ export function getFiscalIndicator(product: any): 'E' | 'G' {
 }
 
 /**
- * Referencia de consulta para el historial de transacciones fiscales:
+ * Ejemplo de consulta para el Libro de Ventas IVA (Auditoría SENIAT)
  * 
- * const vatSalesQuery = query(
+ * const vatSalesBookQuery = query(
  *   collection(firestore, 'users', user.uid, 'sale_transactions'),
  *   where('isFiscal', '==', true),
  *   orderBy('fiscalMetadata.invoiceNumber', 'asc')

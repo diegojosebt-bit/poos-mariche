@@ -180,7 +180,7 @@ export type Expense = {
   createdAt: string;
 };
 
-export type UserModule = 'inventory' | 'pos' | 'repairs' | 'reports' | 'analysis' | 'fiados' | 'inventory_aging' | 'expenses';
+export type UserModule = 'inventory' | 'pos' | 'repairs' | 'reports' | 'analysis' | 'fiados' | 'inventory_aging' | 'loans' | 'expenses' | 'exchange' | 'payroll' | 'treasury';
 
 export type CartItem = {
   productId: string;

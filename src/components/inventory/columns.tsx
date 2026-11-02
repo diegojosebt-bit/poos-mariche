@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ArrowUpDown, MoreHorizontal, Edit, Trash2, TicketPercent, PackagePlus, Lock, Percent, Info, Clock, AlertTriangle, Landmark, PlusCircle, Barcode } from "lucide-react"
 import { Badge } from "../ui/badge"
+import { ProductFormDialog } from "./product-form-dialog"
 import { useToast } from "@/hooks/use-toast"
 import {
   AlertDialog,
@@ -59,8 +60,15 @@ const ActionsCell = ({ product, table }: { product: Product, table: any }) => {
     }
     
     const handleTriggerEdit = () => {
-        (table.options.meta as any)?.onEditProduct?.(product);
+        document.getElementById(`edit-trigger-${product.id}`)?.click();
     }
+
+    const handleOptimisticUpdate = (updatedProduct: Product) => {
+        const mutate = (table.options.meta as any)?.mutate;
+        if (mutate) {
+            mutate((prev: any) => prev?.map((p: any) => p.id === updatedProduct.id ? updatedProduct : p) || null);
+        }
+    };
 
     return (
         <>
@@ -90,6 +98,10 @@ const ActionsCell = ({ product, table }: { product: Product, table: any }) => {
                     </AdminAuthDialog>
                 </DropdownMenuContent>
             </DropdownMenu>
+
+            <ProductFormDialog product={product} onSaved={handleOptimisticUpdate}>
+                <button id={`edit-trigger-${product.id}`} style={{ display: 'none' }}></button>
+            </ProductFormDialog>
 
              <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                  <AlertDialogContent>

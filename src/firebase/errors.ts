@@ -1,6 +1,5 @@
 'use client';
 import { getAuth, type User } from 'firebase/auth';
-import { safeJsonStringify, cleanObject } from '@/lib/json-guard';
 
 type SecurityRuleContext = {
   path: string;
@@ -89,13 +88,11 @@ function buildRequestObject(context: SecurityRuleContext): SecurityRuleRequest {
     // In this case, we'll proceed without auth information.
   }
 
-  const sanitizedResourceData = context.requestResourceData ? cleanObject(context.requestResourceData) : undefined;
-
   return {
     auth: authObject,
     method: context.operation,
     path: `/databases/(default)/documents/${context.path}`,
-    resource: sanitizedResourceData !== undefined ? { data: sanitizedResourceData } : undefined,
+    resource: context.requestResourceData ? { data: context.requestResourceData } : undefined,
   };
 }
 
@@ -106,7 +103,7 @@ function buildRequestObject(context: SecurityRuleContext): SecurityRuleRequest {
  */
 function buildErrorMessage(requestObject: SecurityRuleRequest): string {
   return `Missing or insufficient permissions: The following request was denied by Firestore Security Rules:
-${safeJsonStringify(requestObject, null, 2)}`;
+${JSON.stringify(requestObject, null, 2)}`;
 }
 
 /**

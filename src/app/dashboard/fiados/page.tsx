@@ -1,9 +1,8 @@
 "use client";
 
-import { cleanObject } from "@/lib/json-guard";
 import { PageHeader } from "@/components/page-header";
 import { useCollection, useFirebase, useMemoFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase";
-import { collection, doc, query, orderBy, limit, runTransaction } from "firebase/firestore";
+import { collection, doc, query, orderBy, runTransaction } from "firebase/firestore";
 import type { Fiado, Sale, Payment, Product, FiadoItem, RepairJob, PaymentMethod } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -13,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useMemo, useEffect } from "react";
-import { PlusCircle, HandCoins, DollarSign, Trash2, Search, PackageSearch, X, Plus, ShoppingCart, List, Clock, AlertTriangle, UserCheck, Calendar as CalendarIcon, Smartphone, CreditCard, Landmark, Banknote, TicketPercent, ChevronLeft, ChevronRight } from "lucide-react";
+import { PlusCircle, HandCoins, DollarSign, Trash2, Search, PackageSearch, X, Plus, ShoppingCart, List, Clock, AlertTriangle, UserCheck, Calendar as CalendarIcon, Smartphone, CreditCard, Landmark, Banknote } from "lucide-react";
 import { format, parseISO, differenceInDays, isBefore, isToday, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -25,6 +24,24 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SecurityGate } from "@/components/security-gate";
+
+// Función de utilidad para limpiar objetos de valores undefined antes de enviar a Firestore
+function cleanObject(obj: any): any {
+    if (obj === null || obj === undefined) return obj;
+    const cleaned = { ...obj };
+    Object.keys(cleaned).forEach(key => {
+        if (cleaned[key] === undefined) {
+            delete cleaned[key];
+        } else if (Array.isArray(cleaned[key])) {
+            cleaned[key] = cleaned[key].map((item: any) => 
+                (typeof item === 'object' && item !== null) ? cleanObject(item) : item
+            );
+        } else if (typeof cleaned[key] === 'object' && cleaned[key] !== null) {
+            cleaned[key] = cleanObject(cleaned[key]);
+        }
+    });
+    return cleaned;
+}
 
 const paymentMethodOptions: { value: PaymentMethod, label: string, icon: any, hasReference: boolean, isBs: boolean }[] = [
     { value: 'Efectivo USD', label: 'Efectivo USD', icon: DollarSign, hasReference: false, isBs: false },
@@ -54,8 +71,6 @@ function FiadosContent() {
     const { format: formatCurrency, getSymbol } = useCurrency();
     const [searchTerm, setSearchTerm] = useState("");
     const [isAddOpen, setIsAddOpen] = useState(false);
-    const [currentPage, setCurrentPage] = useState(1);
-    const ITEMS_PER_PAGE = 20;
 
     const fiadosCollection = useMemoFirebase(() => 
         (firestore && user) ? query(collection(firestore, "users", user.uid, "fiados"), orderBy("createdAt", "desc")) : null,
@@ -65,26 +80,13 @@ function FiadosContent() {
 
     const filteredFiados = useMemo(() => {
         if (!fiados) return [];
-        const term = searchTerm.toLowerCase().trim();
-        if (!term) return fiados;
+        const term = searchTerm.toLowerCase();
         return fiados.filter(f => 
             f.customerName.toLowerCase().includes(term) || 
             f.customerID.toLowerCase().includes(term) ||
             f.concept.toLowerCase().includes(term)
         );
     }, [fiados, searchTerm]);
-
-    // Reset to first page when search changes
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm]);
-
-    const totalPages = Math.max(1, Math.ceil(filteredFiados.length / ITEMS_PER_PAGE));
-
-    const paginatedFiados = useMemo(() => {
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredFiados.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-    }, [filteredFiados, currentPage, ITEMS_PER_PAGE]);
 
     const activeDebt = useMemo(() => {
         if (!fiados) return 0;
@@ -163,9 +165,9 @@ function FiadosContent() {
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow><TableCell colSpan={8} className="text-center py-10">Cargando créditos...</TableCell></TableRow>
-                                ) : paginatedFiados.length === 0 ? (
+                                ) : filteredFiados.length === 0 ? (
                                     <TableRow><TableCell colSpan={8} className="text-center py-10 text-muted-foreground">No hay registros que coincidan.</TableCell></TableRow>
-                                ) : paginatedFiados.map((fiado) => {
+                                ) : filteredFiados.map((fiado) => {
                                     const pending = fiado.totalAmount - fiado.amountPaid;
                                     const daysOld = differenceInDays(new Date(), parseISO(fiado.createdAt));
                                     
@@ -188,10 +190,7 @@ function FiadosContent() {
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-bold text-sm">{fiado.customerName}</span>
-                                                        {fiado.isPromo && <Badge className="bg-blue-600 text-[8px] h-3 px-1">PROMO</Badge>}
-                                                    </div>
+                                                    <span className="font-bold text-sm">{fiado.customerName}</span>
                                                     <span className="text-[10px] text-muted-foreground">{fiado.customerID}</span>
                                                 </div>
                                             </TableCell>
@@ -272,36 +271,6 @@ function FiadosContent() {
                             </TableBody>
                         </Table>
                     </CardContent>
-                    {filteredFiados.length > 0 && (
-                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t bg-slate-50/50 text-xs text-muted-foreground">
-                            <div>
-                                Mostrando <span className="font-bold text-slate-800">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> a <span className="font-bold text-slate-800">{Math.min(currentPage * ITEMS_PER_PAGE, filteredFiados.length)}</span> de <span className="font-bold text-slate-800">{filteredFiados.length}</span> créditos
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 px-2 text-xs font-bold"
-                                    disabled={currentPage === 1}
-                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                                >
-                                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
-                                </Button>
-                                <span className="font-bold text-slate-800 px-2">
-                                    Página {currentPage} de {totalPages}
-                                </span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 px-2 text-xs font-bold"
-                                    disabled={currentPage >= totalPages}
-                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                                >
-                                    Siguiente <ChevronRight className="h-4 w-4 ml-1" />
-                                </Button>
-                            </div>
-                        </div>
-                    )}
                 </Card>
             </main>
         </>
@@ -374,16 +343,15 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
     const [concept, setConcept] = useState("");
     const [totalAmount, setTotalAmount] = useState("");
     const [selectedItems, setSelectedItems] = useState<FiadoItem[]>([]);
-    const [isPromo, setIsPromo] = useState(false);
 
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'products'), limit(50)) : null, 
+        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null, 
         [firestore, user?.uid]
     );
     const { data: products } = useCollection<Product>(productsCollection);
 
     const repairJobsCollection = useMemoFirebase(() => 
-        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'repair_jobs'), orderBy('createdAt', 'desc'), limit(100)) : null, 
+        (firestore && user) ? collection(firestore, 'users', user.uid, 'repair_jobs') : null, 
         [firestore, user?.uid]
     );
     const { data: repairJobs } = useCollection<RepairJob>(repairJobsCollection);
@@ -424,14 +392,7 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
             if (existing) {
                 return prev.map(i => i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i);
             }
-            return [...prev, { 
-                productId: p.id!, 
-                productName: p.name, 
-                quantity: 1, 
-                price, 
-                costPrice: p.costPrice,
-                isPromo: !!(p.promoPrice && p.promoPrice > 0)
-            }];
+            return [...prev, { productId: p.id!, productName: p.name, quantity: 1, price, costPrice: p.costPrice }];
         });
         setSearchOpen(false);
     };
@@ -481,8 +442,7 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
                     totalCost: totalCost,
                     status: 'Pendiente',
                     createdAt: new Date().toISOString(),
-                    items: selectedItems,
-                    isPromo: isPromo || selectedItems.some(i => i.isPromo)
+                    items: selectedItems
                 });
                 transaction.set(newDoc, finalData);
                 Object.assign(dataToSave, finalData);
@@ -490,7 +450,7 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
 
             toast({ title: "Fiado registrado" });
             onAdded(dataToSave as Fiado);
-            setCustomerID(""); setCustomerName(""); setCustomerPhone(""); setConcept(""); setTotalAmount(""); setSelectedItems([]); setIsPromo(false);
+            setCustomerID(""); setCustomerName(""); setCustomerPhone(""); setConcept(""); setTotalAmount(""); setSelectedItems([]);
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
@@ -572,23 +532,6 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
                         </div>
                     )}
 
-                    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/40 border">
-                        <div className="space-y-0.5">
-                            <Label className="text-xs font-bold">Promoción Especial</Label>
-                            <p className="text-[10px] text-muted-foreground">Marcar si esta deuda aplica condiciones o precio de promoción</p>
-                        </div>
-                        <Button
-                            type="button"
-                            variant={isPromo ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setIsPromo(!isPromo)}
-                            className="h-8 gap-1.5 text-xs font-bold"
-                        >
-                            <TicketPercent className="w-3.5 h-3.5" />
-                            {isPromo ? "Promo Aplicada" : "Marcar Promo"}
-                        </Button>
-                    </div>
-
                     <div className="space-y-2">
                         <Label>Concepto (Descripción final)</Label>
                         <Input value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="Ej: Pantalla Samsung A51" required />
@@ -624,8 +567,8 @@ function AddItemsToFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: 
     const [selectedItems, setSelectedItems] = useState<FiadoItem[]>([]);
 
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user && open) ? query(collection(firestore, 'users', user.uid, 'products'), limit(50)) : null, 
-        [firestore, user?.uid, open]
+        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null, 
+        [firestore, user?.uid]
     );
     const { data: products } = useCollection<Product>(productsCollection);
 

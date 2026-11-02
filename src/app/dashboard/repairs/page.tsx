@@ -16,7 +16,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { RepairFormDialog } from "@/components/repairs/repair-form-dialog";
-import { ExportRepairsDialog } from "@/components/repairs/export-repairs-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FilterFn } from "@tanstack/react-table";
 import { SecurityGate } from "@/components/security-gate";
@@ -58,9 +57,6 @@ function RepairsContent() {
         [firestore, user?.uid]
     );
     const { data: repairJobs, isLoading, mutate: mutateRepairs } = useCollection<RepairJob>(repairJobsQuery);
-
-    const [editingJob, setEditingJob] = useState<RepairJob | null>(null);
-    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
     const filteredRepairJobs = useMemo(() => {
         if (!repairJobs) return [];
@@ -121,14 +117,7 @@ function RepairsContent() {
                     isLoading={isLoading}
                     filterPlaceholder="Buscar cliente o equipo..."
                     globalFilterFn={repairFilterFn}
-                    searchAddon={<ExportRepairsDialog repairs={repairJobs || []} />}
-                    meta={{ 
-                        mutate: mutateRepairs,
-                        onEditRepair: (job: RepairJob) => {
-                            setEditingJob(job);
-                            setIsEditDialogOpen(true);
-                        }
-                    }}
+                    meta={{ mutate: mutateRepairs }}
                 >
                     {(table) => (
                         <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -147,18 +136,6 @@ function RepairsContent() {
                         </div>
                     )}
                 </DataTable>
-
-                {editingJob && (
-                    <RepairFormDialog 
-                        repairJob={editingJob} 
-                        isOpen={isEditDialogOpen} 
-                        onOpenChange={(open) => {
-                            setIsEditDialogOpen(open);
-                            if (!open) setEditingJob(null);
-                        }} 
-                        onSaved={handleOptimisticUpdate} 
-                    />
-                )}
             </main>
         </>
     )
