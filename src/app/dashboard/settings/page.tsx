@@ -398,7 +398,13 @@ function SettingsContent() {
                                         requestAdminAuthorization(
                                             "Desactivar Bloqueo de Eliminación",
                                             "Introduce el PIN de Administrador para desactivar la protección contra eliminación de registros.",
-                                            () => setIsDataDeletionLocked(false)
+                                            () => {
+                                                setIsDataDeletionLocked(false);
+                                                // Persistir de inmediato: no depende del botón Guardar.
+                                                if (userProfileRef) {
+                                                    updateDocumentNonBlocking(userProfileRef, { isDataDeletionLocked: false });
+                                                }
+                                            }
                                         );
                                     }
                                 }} 
@@ -765,6 +771,60 @@ function SettingsContent() {
                     <Button variant="destructive" onClick={() => signOut(auth)} size="lg" className="uppercase font-bold w-full max-w-xs shadow-xl"><LogOut className="mr-2 h-5 w-5" /> Cerrar Sesión</Button>
                 </div>
             </main>
+
+            <Dialog
+                open={pinVerifyModal.open}
+                onOpenChange={(open) => {
+                    setPinVerifyModal(prev => ({ ...prev, open }));
+                    if (!open) setModalPinInput("");
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="uppercase font-black text-sm">{pinVerifyModal.title}</DialogTitle>
+                        <DialogDescription className="text-xs">{pinVerifyModal.description}</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2 py-3">
+                        <Label className="text-[10px] font-black uppercase">PIN de Administrador</Label>
+                        <Input
+                            type="password"
+                            name="mm-settings-admin-pin"
+                            autoComplete="new-password"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            spellCheck={false}
+                            autoCorrect="off"
+                            autoCapitalize="none"
+                            value={modalPinInput}
+                            onChange={(e) => setModalPinInput(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleConfirmModalPin();
+                                }
+                            }}
+                            autoFocus
+                            maxLength={8}
+                            placeholder="••••"
+                            className="text-center text-xl font-black tracking-widest h-12"
+                        />
+                    </div>
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setPinVerifyModal(prev => ({ ...prev, open: false }));
+                                setModalPinInput("");
+                            }}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button onClick={handleConfirmModalPin} disabled={!modalPinInput.trim()}>
+                            Autorizar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }
