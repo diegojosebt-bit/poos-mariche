@@ -22,6 +22,11 @@ type DashboardContextType = {
   // Blindaje de Perfil: Un solo listener para evitar lecturas de perfil duplicadas
   profile: UserProfile | null;
   setProfile: (profile: UserProfile | null) => void;
+
+  // Gestión de Seguridad PIN (Modo Gerente)
+  isSecurityUnlocked: boolean;
+  unlockSecurity: () => void;
+  lockSecurity: () => void;
 };
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
@@ -30,6 +35,26 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const [dataCache, setDataCache] = useState<Record<string, any[] | null>>({});
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isSecurityUnlocked, setIsSecurityUnlocked] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('mm_security_unlocked') === 'true';
+    }
+    return false;
+  });
+
+  const unlockSecurity = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('mm_security_unlocked', 'true');
+    }
+    setIsSecurityUnlocked(true);
+  }, []);
+
+  const lockSecurity = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('mm_security_unlocked');
+    }
+    setIsSecurityUnlocked(false);
+  }, []);
 
   const setCachedData = useCallback((key: string, data: any[] | null) => {
     setDataCache(prev => {
@@ -111,7 +136,10 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
       settings,
       setSettings,
       profile,
-      setProfile
+      setProfile,
+      isSecurityUnlocked,
+      unlockSecurity,
+      lockSecurity
     }}>
       {children}
     </DashboardContext.Provider>

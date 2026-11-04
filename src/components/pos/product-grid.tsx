@@ -7,31 +7,34 @@ import { ScrollArea } from "../ui/scroll-area";
 import { useCurrency } from "@/hooks/use-currency";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "../ui/skeleton";
-import { TicketPercent, Search, PackagePlus, Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { TicketPercent, Search, Sparkles, Loader2, PlusCircle } from "lucide-react";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "../ui/button";
 import { useDebounce } from "use-debounce";
-import { useFirebase } from "@/firebase";
-import { collection, query, where, limit, getDocs } from "firebase/firestore";
+import { normalizeText } from "@/lib/search-index";
 
 type ProductGridProps = {
   products: Product[];
   onProductSelect: (product: Product) => void;
   isLoading?: boolean;
   mutateProducts: (updater: any) => void;
+  /** Catálogo paginado: hay más productos en el servidor. */
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
+  /** Notifica el término para disparar la búsqueda en servidor. */
+  onSearchChange?: (term: string) => void;
+  isServerSearching?: boolean;
 };
 
-const ITEMS_PER_PAGE = 20;
+const ITEMS_PER_PAGE = 24;
 
-export function ProductGrid({ products, onProductSelect, isLoading, mutateProducts }: ProductGridProps) {
-  const { firestore, user } = useFirebase();
+export function ProductGrid({ products, onProductSelect, isLoading, mutateProducts, hasMore, isLoadingMore, onLoadMore, onSearchChange, isServerSearching }: ProductGridProps) {
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearch] = useDebounce(searchTerm, 400);
+  const [debouncedSearch] = useDebounce(searchTerm, 300);
   const { format, getSymbol, getFinalPrice, convert } = useCurrency();
   const [currentPage, setCurrentPage] = useState(1);
-  const [isFallbackLoading, setIsFallbackLoading] = useState(false);
-  const [lastSearchedTerm, setLastSearchedTerm] = useState("");
 
   const categories = useMemo(() => {
     if (!products) return ['Todos'];
@@ -41,62 +44,24 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
 
   const [activeCategory, setActiveCategory] = useState('Todos');
 
-  // FILTRADO LOCAL (PASO 1 - 0 LECTURAS)
+  // FILTRADO EN MEMORIA RAM (0 LECTURAS, 0ms DE LATENCIA)
+  // Normaliza acentos y signos para que "bateria" encuentre "Batería".
   const filteredProducts = useMemo(() => {
     if (!products) return [];
-    const term = debouncedSearch.toLowerCase().trim();
-    
-    return products.filter(
-        (product) =>
-        (activeCategory === 'Todos' || product.category === activeCategory) &&
-        (
-            product.name.toLowerCase().includes(term) ||
-            (product.sku && product.sku.toLowerCase().includes(term)) ||
-            (product.barcode && product.barcode.toLowerCase().includes(term)) ||
-            (product.compatibleModels && product.compatibleModels.some(model => model.toLowerCase().includes(term)))
-        )
-    ).sort((a, b) => a.name.localeCompare(b.name));
+    const term = normalizeText(debouncedSearch);
+
+    return products.filter((product) => {
+        if (activeCategory !== 'Todos' && product.category !== activeCategory) return false;
+        if (!term) return true;
+
+        return (
+            normalizeText(product.name).includes(term) ||
+            normalizeText(product.sku).includes(term) ||
+            normalizeText(product.barcode).includes(term) ||
+            normalizeText((product.compatibleModels ?? []).join(' ')).includes(term)
+        );
+    }).sort((a, b) => a.name.localeCompare(b.name));
   }, [products, activeCategory, debouncedSearch]);
-
-  // BÚSQUEDA BAJO DEMANDA (PASO 2 - FALLBACK DE 1 LECTURA)
-  useEffect(() => {
-    const term = debouncedSearch.trim().toLowerCase();
-    if (!firestore || !user || term.length < 3 || term === lastSearchedTerm) return;
-
-    // Solo consultamos a la nube si la memoria RAM no tiene resultados para este término
-    if (filteredProducts.length === 0 && !isLoading) {
-        const performFallbackSearch = async () => {
-            setIsFallbackLoading(true);
-            setLastSearchedTerm(term);
-            try {
-                // Buscamos por palabras clave en el índice global del servidor
-                const q = query(
-                    collection(firestore, 'users', user.uid, 'products'),
-                    where('searchKeywords', 'array-contains', term),
-                    limit(5)
-                );
-                
-                const snap = await getDocs(q);
-                if (!snap.empty) {
-                    const newProducts = snap.docs.map(d => ({ ...d.data(), id: d.id }) as Product);
-                    
-                    // INYECCIÓN EN MEMORIA GLOBAL
-                    mutateProducts((prev: Product[] | null) => {
-                        const existingIds = new Set((prev || []).map(p => p.id));
-                        const uniqueNew = newProducts.filter(p => !existingIds.has(p.id));
-                        return [...(prev || []), ...uniqueNew];
-                    });
-                }
-            } catch (e) {
-                console.error("Fallback search failed:", e);
-            } finally {
-                setIsFallbackLoading(false);
-            }
-        };
-
-        performFallbackSearch();
-    }
-  }, [debouncedSearch, filteredProducts.length, firestore, user, isLoading, mutateProducts, lastSearchedTerm]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -152,14 +117,14 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
                     placeholder="Buscar producto o escanear código..."
                     className="w-full pl-8 h-8 text-xs"
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        onSearchChange?.(e.target.value);
+                    }}
                     autoFocus
                 />
-                {isFallbackLoading && (
-                    <div className="absolute right-2 top-1.5 flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 border border-blue-100 animate-in fade-in duration-300">
-                        <Loader2 className="h-3 w-3 animate-spin text-blue-600" />
-                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-tighter">Buscando...</span>
-                    </div>
+                {isServerSearching && (
+                    <Loader2 className="absolute right-2 top-2 h-3.5 w-3.5 animate-spin text-primary" />
                 )}
             </div>
         </div>
@@ -181,6 +146,11 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
                     ))
                 ) : paginatedProducts.map((product) => {
                     const availableStock = getAvailableStock(product);
+                    // Combo con componentes fuera de la página: se deja seleccionar
+                    // para que el POS los traiga por id y calcule el stock real.
+                    const missingComboComponent = !!product.isCombo &&
+                        (product.comboItems ?? []).some((item) => !products.some((p) => p.id === item.productId));
+                    const canSelect = availableStock > 0 || missingComboComponent;
                     const promoPrice = (typeof product.promoPrice === 'number' && product.promoPrice > 0) ? product.promoPrice : 0;
                     const hasPromo = promoPrice > 0;
                     const unitLabel = product.unit && product.unit !== 'unit' ? product.unit : 'pza';
@@ -195,10 +165,10 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
                     return (
                         <Card
                             key={product.id}
-                            onClick={() => availableStock > 0 && onProductSelect(product)}
+                            onClick={() => canSelect && onProductSelect(product)}
                             className={cn(
                                 "cursor-pointer hover:border-primary transition-all flex flex-col justify-between h-full group border shadow-sm relative overflow-hidden",
-                                availableStock <= 0 && "opacity-50 cursor-not-allowed bg-slate-50 border-dashed"
+                                !canSelect && "opacity-50 cursor-not-allowed bg-slate-50 border-dashed"
                             )}
                         >
                             {isNewInCache && (
@@ -216,8 +186,8 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
                             </CardHeader>
                             <CardFooter className="p-1.5 flex flex-col items-stretch gap-0.5 mt-auto border-t bg-slate-50/50 group-hover:bg-white transition-colors">
                                 <div className="flex justify-between items-center">
-                                    <span className={cn("text-[8px] font-black uppercase", availableStock <= 0 ? "text-destructive" : "text-slate-500")}>
-                                        S: {availableStock}
+                                    <span className={cn("text-[8px] font-black uppercase", !canSelect ? "text-destructive" : "text-slate-500")}>
+                                        S: {missingComboComponent ? '?' : availableStock}
                                     </span>
                                     <div className="text-xs font-black text-primary">
                                       {getSymbol('USD')}{format(displayPrice, 'USD')}
@@ -240,17 +210,33 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
             </div>
           </ScrollArea>
         </div>
-         {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-3 flex-shrink-0 bg-white/80 backdrop-blur-sm mt-auto border-t">
-                <span className="text-[9px] text-muted-foreground font-black uppercase">
-                    Pág. {currentPage} / {totalPages}
+        <div className="flex items-center justify-between pt-2.5 flex-shrink-0 bg-white/80 backdrop-blur-sm mt-auto border-t gap-2">
+            <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground font-semibold">
+                    Pág. <strong className="text-foreground">{currentPage}</strong> de {totalPages} ({filteredProducts.length} producto{filteredProducts.length === 1 ? '' : 's'})
                 </span>
-                <div className="flex gap-1">
-                    <Button variant="outline" size="sm" className="h-6 text-[9px] px-2 font-bold" onClick={handlePreviousPage} disabled={currentPage === 1}>Anterior</Button>
-                    <Button variant="outline" size="sm" className="h-6 text-[9px] px-2 font-bold" onClick={handleNextPage} disabled={currentPage >= totalPages}>Siguiente</Button>
-                </div>
+                {onLoadMore && hasMore && (
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        className="h-7 text-xs px-2.5 font-medium"
+                        onClick={onLoadMore}
+                        disabled={isLoadingMore}
+                    >
+                        {isLoadingMore
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <PlusCircle className="w-3 h-3" />}
+                        <span className="ml-1">Cargar 100 más</span>
+                    </Button>
+                )}
             </div>
-        )}
+            {totalPages > 1 && (
+                <div className="flex gap-1.5">
+                    <Button variant="outline" size="sm" className="h-7 text-xs px-2.5 font-medium" onClick={handlePreviousPage} disabled={currentPage === 1}>Anterior</Button>
+                    <Button variant="outline" size="sm" className="h-7 text-xs px-2.5 font-medium" onClick={handleNextPage} disabled={currentPage >= totalPages}>Siguiente</Button>
+                </div>
+            )}
+        </div>
     </div>
   );
 }

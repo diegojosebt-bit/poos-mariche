@@ -1,7 +1,7 @@
 "use client";
 
 import { ProductGrid } from "@/components/pos/product-grid";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CartItem, Product, RepairJob, HeldSale, Sale, ReservedPart } from "@/lib/types";
 import { CartDisplay } from "@/components/pos/cart-display";
 import { useSearchParams } from "next/navigation";
@@ -11,28 +11,100 @@ import { useRouter } from "next/navigation";
 import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking } from "@/firebase";
 import { collection, doc, query, limit, orderBy } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { Calculator } from "lucide-react";
+import { Calculator, RefreshCw } from "lucide-react";
 import { HeldSalesSheet } from "@/components/pos/held-sales-sheet";
 import { PriceCalculatorDialog } from "@/components/tools/price-calculator-dialog";
 import { CustomItemDialog } from "@/components/pos/custom-item-dialog";
 import { SecurityGate } from "@/components/security-gate";
 import { useDashboardStore } from "@/contexts/dashboard-context";
+import { useCurrency } from '@/hooks/use-currency';
+import { usePagedQuery } from '@/lib/firestore/use-paged-query';
+import { useServerSearch } from '@/lib/firestore/use-server-search';
+import { queryCache, type WithId } from '@/lib/firestore/query-cache';
+import { fetchDocsByIds } from '@/lib/firestore/fetch-by-ids';
+import { useFeatureFlag } from '@/lib/features';
 
 function POSContent() {
     const { firestore, user, isUserLoading } = useFirebase();
     const { toast } = useToast();
+    const { getFinalPrice } = useCurrency();
     const searchParams = useSearchParams();
     const router = useRouter();
     const [cart, setCart] = useState<CartItem[]>([]);
     const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
-    const { addItemToCache } = useDashboardStore();
+    const { addItemToCache, profile } = useDashboardStore();
+    const uid = user?.uid ?? '';
+    const usePaged = useFeatureFlag(profile, 'pagedData');
+    const restoreFetchAttempts = useRef<Set<string>>(new Set());
 
-    // ESTANDARIZADO: Límite 200 productos para compartir cache global
+    // LEGACY (bandera apagada): catálogo completo, como hasta ahora.
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'products'), orderBy('name'), limit(200)) : null,
+        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null,
         [firestore, user?.uid]
     );
-    const { data: products, isLoading: productsLoading, mutate: mutateProducts } = useCollection<Product>(productsCollection);
+    const legacy = useCollection<Product>(usePaged ? null : productsCollection);
+
+    // FASE 2 (bandera encendida): 100 productos + "Cargar más".
+    const paged = usePagedQuery<Product>({
+        collectionName: 'products',
+        orderField: 'name',
+        orderDir: 'asc',
+        pageSize: 100,
+        enabled: usePaged,
+    });
+
+    const pagedProducts = useMemo(
+        () => paged.items.filter((product) => !product.isDeleted),
+        [paged.items],
+    );
+
+    const products = usePaged ? pagedProducts : legacy.data;
+    const productsLoading = usePaged ? paged.isLoading : legacy.isLoading;
+
+    /** Sustituye al `mutate` del hook legacy cuando la bandera está activa. */
+    const mutateProducts = useCallback((updater: WithId<Product>[] | ((prev: WithId<Product>[] | null) => WithId<Product>[] | null)) => {
+        if (!usePaged || !uid) {
+            legacy.mutate(updater);
+            return;
+        }
+
+        const current = paged.items;
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        if (!Array.isArray(next)) return;
+
+        const currentById = new Map(current.map((item) => [item.id, item]));
+        const nextIds = new Set(next.map((item) => item.id));
+
+        next.forEach((item) => {
+            if (!item?.id) return;
+            const previous = currentById.get(item.id);
+            if (!previous) {
+                queryCache.mergeIntoCatalog(uid, 'products', [item]);
+            } else if (previous !== item) {
+                queryCache.patchItem(uid, 'products', item.id, item);
+            }
+        });
+
+        current.forEach((item) => {
+            if (item.id && !nextIds.has(item.id)) {
+                queryCache.removeItem(uid, 'products', item.id);
+            }
+        });
+    }, [usePaged, uid, paged.items, legacy.mutate]);
+
+    // Búsqueda en servidor: los resultados se fusionan al catálogo y el grid
+    // los muestra con su filtro local (sin cambiar el flujo de datos).
+    const [productSearchTerm, setProductSearchTerm] = useState('');
+    const serverSearchFlag = useFeatureFlag(profile, 'serverSearch');
+    const productSearch = useServerSearch<Product>({
+        collectionName: 'products',
+        term: productSearchTerm,
+        orderField: 'name',
+        orderDir: 'asc',
+        pageSize: 20,
+        enabled: usePaged && serverSearchFlag,
+        onResults: (found) => queryCache.mergeIntoCatalog(uid, 'products', found),
+    });
     
     const heldSalesCollection = useMemoFirebase(() => 
         (firestore && user) ? collection(firestore, 'users', user.uid, 'held_sales') : null,
@@ -50,6 +122,46 @@ function POSContent() {
         if (restoredCartItems && products) {
             try {
                 const itemsToRestore: CartItem[] = JSON.parse(decodeURIComponent(restoredCartItems));
+
+                // Catálogo paginado: si la venta retenida apunta a productos que
+                // no están en la página, se traen por id antes de restaurar.
+                const missingIds = usePaged
+                    ? Array.from(new Set(
+                        itemsToRestore
+                            .filter((item) => !item.isCustom && !products.some((p) => p.id === item.productId))
+                            .map((item) => item.productId)
+                            .filter((id) => !restoreFetchAttempts.current.has(id)),
+                    ))
+                    : [];
+
+                if (missingIds.length > 0 && firestore && user) {
+                    missingIds.forEach((id) => restoreFetchAttempts.current.add(id));
+                    void fetchDocsByIds<Product>(firestore, user.uid, 'products', missingIds);
+                    return; // el merge actualiza `products` y el efecto vuelve a entrar
+                }
+
+                // Si la venta retenida incluye combos, sus componentes también
+                // deben estar en caché para descontar stock y calcular costo.
+                const restoredProducts = itemsToRestore
+                    .filter((item) => !item.isCustom)
+                    .map((item) => products.find((p) => p.id === item.productId))
+                    .filter((p): p is WithId<Product> => Boolean(p));
+
+                const missingComboIds = usePaged
+                    ? Array.from(new Set(
+                        restoredProducts
+                            .filter((p) => p.isCombo)
+                            .flatMap((p) => (p.comboItems ?? []).map((c) => c.productId))
+                            .filter((id) => !products.some((p) => p.id === id) && !restoreFetchAttempts.current.has(id)),
+                    ))
+                    : [];
+
+                if (missingComboIds.length > 0 && firestore && user) {
+                    missingComboIds.forEach((id) => restoreFetchAttempts.current.add(id));
+                    void fetchDocsByIds<Product>(firestore, user.uid, 'products', missingComboIds);
+                    return;
+                }
+
                 const restoredCart = itemsToRestore.map(item => {
                     if (item.isCustom) return item;
                     const product = products.find(p => p.id === item.productId);
@@ -80,14 +192,13 @@ function POSContent() {
                 router.push('/dashboard/repairs');
             }
         }
-    }, [searchParams, user, isUserLoading, products, firestore]);
+    }, [searchParams, user, isUserLoading, products, firestore, usePaged]);
 
-    const getAvailableStock = (product: Product) => {
-        if (!products) return 0;
+    const getAvailableStock = (product: Product, catalog: Product[] = products ?? []) => {
         if (product.isCombo) {
              if (!product.comboItems || product.comboItems.length === 0) return 0;
              const stockCounts = product.comboItems.map(item => {
-                 const component = products.find(p => p.id === item.productId);
+                 const component = catalog.find(p => p.id === item.productId);
                  if (!component) return 0;
                  const available = (Number(component.stockLevel) || 0) - (Number(component.reservedStock) || 0) - (Number(component.damagedStock) || 0);
                  return Math.floor(available / (item.quantity || 1));
@@ -97,8 +208,23 @@ function POSContent() {
         return (Number(product.stockLevel) || 0) - (Number(product.reservedStock) || 0) - (Number(product.damagedStock) || 0);
     };
 
-    const handleProductSelect = (product: Product) => {
-        const available = getAvailableStock(product);
+    const handleProductSelect = async (product: Product) => {
+        let catalog = products ?? [];
+
+        // Catálogo paginado: si el combo depende de productos fuera de la
+        // página, se traen por id para calcular stock/costo correctamente.
+        if (usePaged && product.isCombo && product.comboItems?.length && firestore && user) {
+            const missing = product.comboItems
+                .map((component) => component.productId)
+                .filter((id) => !catalog.some((p) => p.id === id));
+
+            if (missing.length > 0) {
+                const fetched = await fetchDocsByIds<Product>(firestore, user.uid, 'products', missing);
+                if (fetched.length > 0) catalog = [...catalog, ...fetched];
+            }
+        }
+
+        const available = getAvailableStock(product, catalog);
         
         setCart(prev => {
             const existing = prev.find(i => i.productId === product.id && !i.isRepair && !i.isCustom);
@@ -122,7 +248,11 @@ function POSContent() {
                 name: product.name, 
                 quantity: 1, 
                 isPromo: false, // REQUERIMIENTO: No aplicar oferta automáticamente al añadir
-                discount: discountToApply
+                discount: discountToApply,
+                // Costo y precio congelados: el checkout no depende de que el
+                // producto siga en la página cargada.
+                costPrice: product.costPrice,
+                basePrice: getFinalPrice(product)
             }];
         });
     };
@@ -216,7 +346,7 @@ function POSContent() {
             }
 
             return modified ? Array.from(productsMap.values()) : currentProducts;
-        }, false);
+        });
         
         setActiveRepairJob(null);
         localStorage.removeItem('mm_repair_draft');
@@ -242,6 +372,11 @@ function POSContent() {
                         onProductSelect={handleProductSelect} 
                         isLoading={productsLoading}
                         mutateProducts={mutateProducts}
+                        hasMore={usePaged ? paged.hasMore : false}
+                        isLoadingMore={paged.isLoadingMore}
+                        onLoadMore={usePaged ? () => { void paged.loadMore(); } : undefined}
+                        onSearchChange={setProductSearchTerm}
+                        isServerSearching={usePaged && serverSearchFlag && productSearch.isSearching}
                     />
                 </div>
                 <div className="order-2 md:order-1 md:col-span-1 lg:col-span-2 bg-white border-t md:border-t-0 md:border-r flex flex-col h-[45vh] md:h-full">

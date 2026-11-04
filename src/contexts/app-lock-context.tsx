@@ -6,7 +6,6 @@ import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
 import { doc } from 'firebase/firestore';
 import type { UserProfile } from '@/lib/types';
 
-const FALLBACK_PIN = "2026";
 const SESSION_STORAGE_KEY = 'app_unlocked';
 
 interface AppLockContextType {
@@ -17,7 +16,7 @@ interface AppLockContextType {
 const AppLockContext = createContext<AppLockContextType | undefined>(undefined);
 
 export function AppLockProvider({ children }: { children: ReactNode }) {
-  const [isLocked, setIsLocked] = useState(true);
+  const [isLocked, setIsLocked] = useState(false);
   const { firestore, user } = useFirebase();
 
   const profileRef = useMemoFirebase(() => 
@@ -27,21 +26,28 @@ export function AppLockProvider({ children }: { children: ReactNode }) {
   const { data: profile } = useDoc<UserProfile>(profileRef);
 
   useEffect(() => {
-    // Check session storage on initial client-side load
-    try {
-      const isUnlockedInSession = sessionStorage.getItem(SESSION_STORAGE_KEY) === 'true';
-      if (isUnlockedInSession) {
-        setIsLocked(false);
+    // Only lock if profile explicitly requires PIN and a PIN is set
+    if (profile?.isPinRequired && profile?.securityPin) {
+      try {
+        const isUnlockedInSession = sessionStorage.getItem(SESSION_STORAGE_KEY) === 'true';
+        if (!isUnlockedInSession) {
+          setIsLocked(true);
+        }
+      } catch (error) {
+        console.error("Could not access session storage:", error);
       }
-    } catch (error) {
-      console.error("Could not access session storage:", error);
+    } else {
+      setIsLocked(false);
     }
-  }, []);
+  }, [profile?.isPinRequired, profile?.securityPin]);
 
   const unlockApp = useCallback((password: string): boolean => {
-    const requiredPin = profile?.securityPin || FALLBACK_PIN;
+    if (!profile?.securityPin) {
+      setIsLocked(false);
+      return true;
+    }
 
-    if (password === requiredPin) {
+    if (password === profile.securityPin) {
       try {
         sessionStorage.setItem(SESSION_STORAGE_KEY, 'true');
       } catch (error) {

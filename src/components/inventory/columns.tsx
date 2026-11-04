@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ArrowUpDown, MoreHorizontal, Edit, Trash2, TicketPercent, PackagePlus, Lock, Percent, Info, Clock, AlertTriangle, Landmark, PlusCircle, Barcode } from "lucide-react"
 import { Badge } from "../ui/badge"
-import { ProductFormDialog } from "./product-form-dialog"
 import { useToast } from "@/hooks/use-toast"
 import {
   AlertDialog,
@@ -60,15 +59,8 @@ const ActionsCell = ({ product, table }: { product: Product, table: any }) => {
     }
     
     const handleTriggerEdit = () => {
-        document.getElementById(`edit-trigger-${product.id}`)?.click();
+        (table.options.meta as any)?.onEditProduct?.(product);
     }
-
-    const handleOptimisticUpdate = (updatedProduct: Product) => {
-        const mutate = (table.options.meta as any)?.mutate;
-        if (mutate) {
-            mutate((prev: any) => prev?.map((p: any) => p.id === updatedProduct.id ? updatedProduct : p) || null);
-        }
-    };
 
     return (
         <>
@@ -82,7 +74,7 @@ const ActionsCell = ({ product, table }: { product: Product, table: any }) => {
                 <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                     
-                    <AdminAuthDialog onAuthorized={handleTriggerEdit}>
+                    <AdminAuthDialog actionType="editProducts" onAuthorized={handleTriggerEdit}>
                         <DropdownMenuItem onSelect={(e) => { e.preventDefault(); }}>
                             <Edit className="mr-2 h-4 w-4" />
                             Editar / Ajustar Stock
@@ -90,7 +82,7 @@ const ActionsCell = ({ product, table }: { product: Product, table: any }) => {
                     </AdminAuthDialog>
                     
                     <DropdownMenuSeparator />
-                    <AdminAuthDialog onAuthorized={() => setIsDeleteDialogOpen(true)}>
+                    <AdminAuthDialog actionType="deleteProducts" onAuthorized={() => setIsDeleteDialogOpen(true)}>
                         <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(e) => { e.preventDefault(); }}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Eliminar permanentemente
@@ -98,10 +90,6 @@ const ActionsCell = ({ product, table }: { product: Product, table: any }) => {
                     </AdminAuthDialog>
                 </DropdownMenuContent>
             </DropdownMenu>
-
-            <ProductFormDialog product={product} onSaved={handleOptimisticUpdate}>
-                <button id={`edit-trigger-${product.id}`} style={{ display: 'none' }}></button>
-            </ProductFormDialog>
 
              <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                  <AlertDialogContent>
@@ -230,10 +218,10 @@ export const columns: ColumnDef<Product>[] = [
             <div className="max-w-xs">
                 <div className="font-medium flex items-center gap-2">
                     {product.name}
-                    {product.isCombo && <PackagePlus className="h-4 w-4 text-muted-foreground" title="Combo" />}
-                    {product.isFixedPrice && <Lock className="h-3 w-3 text-amber-500" title="Precio Fijo" />}
-                    {product.hasCustomMargin && !product.isFixedPrice && <Percent className="h-3 w-3 text-blue-500" title={`Margen Indiv: ${product.customMargin}%`} />}
-                    {product.hasIVA && <Landmark className="h-3 w-3 text-green-600" title="Aplica IVA (16%)" />}
+                    {product.isCombo && <span title="Combo"><PackagePlus className="h-4 w-4 text-muted-foreground" /></span>}
+                    {product.isFixedPrice && <span title="Precio Fijo"><Lock className="h-3 w-3 text-amber-500" /></span>}
+                    {product.hasCustomMargin && !product.isFixedPrice && <span title={`Margen Indiv: ${product.customMargin}%`}><Percent className="h-3 w-3 text-blue-500" /></span>}
+                    {product.hasIVA && <span title="Aplica IVA (16%)"><Landmark className="h-3 w-3 text-green-600" /></span>}
                 </div>
                 {showRepairs && compatibleModels.length > 0 && (
                     <div className="text-xs text-muted-foreground truncate" title={compatibleModels.join(', ')}>
@@ -380,8 +368,8 @@ export const columns: ColumnDef<Product>[] = [
           <div className="text-right">
             <div className={cn("font-medium flex items-center justify-end gap-1", hasPromo && "text-green-600")}>
               {product.hasIVA && <Badge variant="outline" className="text-[8px] h-3 px-1 border-green-600 text-green-600 font-bold">IVA</Badge>}
-              {product.isFixedPrice && !hasPromo && <Lock className="w-3 h-3 text-amber-500" title="Precio Fijo" />}
-              {product.hasCustomMargin && !product.isFixedPrice && !hasPromo && <Percent className="w-3 h-3 text-blue-500" title={`Margen Individual: ${product.customMargin}%`} />}
+              {product.isFixedPrice && !hasPromo && <span title="Precio Fijo"><Lock className="w-3 h-3 text-amber-500" /></span>}
+              {product.hasCustomMargin && !product.isFixedPrice && !hasPromo && <span title={`Margen Individual: ${product.customMargin}%`}><Percent className="w-3 h-3 text-blue-500" /></span>}
               {hasPromo && <TicketPercent className="w-3 h-3 inline-block" />}
               ${format(displayPrice)}{unitLabel}
             </div>

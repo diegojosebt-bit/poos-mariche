@@ -6,7 +6,7 @@ import { getAuth } from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
-  persistentSingleTabManager,
+  persistentMultipleTabManager,
   getFirestore,
   Firestore
 } from 'firebase/firestore';
@@ -17,16 +17,7 @@ import {
  */
 export function initializeFirebase() {
   if (!getApps().length) {
-    let firebaseApp;
-    try {
-      firebaseApp = initializeApp();
-    } catch (e) {
-      if (process.env.NODE_ENV === "production") {
-        console.warn('Automatic initialization failed. Falling back to firebase config object.', e);
-      }
-      firebaseApp = initializeApp(firebaseConfig);
-    }
-
+    const firebaseApp = initializeApp(firebaseConfig);
     return getSdks(firebaseApp);
   }
 
@@ -35,23 +26,16 @@ export function initializeFirebase() {
 
 /**
  * getSdks - Configura y retorna las instancias de Auth y Firestore.
- * Implementa persistencia local en IndexedDB con bloqueo de pestaña única (Safety First).
+ * Implementa persistencia local en IndexedDB compartida entre múltiples pestañas.
  */
 export function getSdks(firebaseApp: FirebaseApp) {
   let firestore: Firestore;
 
   if (typeof window !== 'undefined') {
-    /**
-     * CONFIGURACIÓN DE SEGURIDAD Y COSTOS:
-     * 1. persistentLocalCache: Habilita el guardado de datos en IndexedDB.
-     * 2. persistentSingleTabManager: Restringe la caché a una sola pestaña activa. 
-     *    Si se abre otra pestaña, Firestore funcionará sin caché o dará error de permisos 
-     *    según las reglas de negocio implementadas en el layout.
-     */
     try {
       firestore = initializeFirestore(firebaseApp, {
         localCache: persistentLocalCache({
-          tabManager: persistentSingleTabManager()
+          tabManager: persistentMultipleTabManager()
         })
       });
     } catch (e) {

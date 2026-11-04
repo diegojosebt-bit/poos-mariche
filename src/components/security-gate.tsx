@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo } from 'react';
-import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
-import { doc } from 'firebase/firestore';
+import { useFirebase } from '@/firebase';
+import { useDashboardStore } from '@/contexts/dashboard-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
@@ -20,13 +20,9 @@ type SecurityGateProps = {
 export function SecurityGate({ children, module }: SecurityGateProps) {
     const { firestore, user } = useFirebase();
     const { toast } = useToast();
+    const { profile, isSecurityUnlocked, unlockSecurity } = useDashboardStore();
+    const isProfileLoading = !profile;
     const [pin, setPin] = useState("");
-    
-    const profileRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile, isLoading: isProfileLoading } = useDoc<UserProfile>(profileRef);
 
     // EVALUACIÓN DE ACCESO EN TIEMPO REAL
     const isAuthorized = useMemo(() => {
@@ -44,8 +40,7 @@ export function SecurityGate({ children, module }: SecurityGateProps) {
         }
 
         // Si la sesión ya fue desbloqueada manualmente.
-        const sessionUnlocked = typeof window !== 'undefined' && sessionStorage.getItem(SESSION_KEY) === 'true';
-        if (sessionUnlocked) {
+        if (isSecurityUnlocked) {
             return true;
         }
 
@@ -56,15 +51,15 @@ export function SecurityGate({ children, module }: SecurityGateProps) {
         }
 
         return true;
-    }, [profile, isProfileLoading, module]);
+    }, [profile, isProfileLoading, module, isSecurityUnlocked]);
 
     const handleUnlock = () => {
         if (!profile?.securityPin) return;
 
         if (pin === profile.securityPin) {
-            sessionStorage.setItem(SESSION_KEY, 'true');
-            window.location.reload(); // Recargamos para limpiar estados y validar todo el layout
-            toast({ title: "Acceso Concedido" });
+            unlockSecurity();
+            toast({ title: "Acceso Concedido", description: "Modo Administrador activado." });
+            setPin("");
         } else {
             toast({ 
                 variant: "destructive", 

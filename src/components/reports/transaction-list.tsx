@@ -14,8 +14,10 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "../ui/skeleton";
 import { AdminAuthDialog } from "../admin-auth-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
-import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
+import { useFirebase } from "@/firebase";
+import { useDashboardStore } from "@/contexts/dashboard-context";
 import { doc, runTransaction, getDoc, type DocumentSnapshot } from "firebase/firestore";
+import { saleStatsWrites } from '@/lib/firestore/rollups';
 import { Badge } from "../ui/badge";
 import { Textarea } from "../ui/textarea";
 import { Label } from "../ui/label";
@@ -31,6 +33,9 @@ import { Separator } from "../ui/separator";
 type TransactionListProps = {
     sales: Sale[];
     isLoading?: boolean;
+    hasMore?: boolean;
+    isLoadingMore?: boolean;
+    onLoadMore?: () => void;
 };
 
 const PAYMENT_METHODS: (PaymentMethod | 'ALL')[] = [
@@ -131,11 +136,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     });
                 }
 
-                const saleBcv = sale.bcvRateAtTime || 1;
-                const saleParallel = sale.parallelRateAtTime || 1;
-                const isSalePromo = sale.items.some(i => i.isPromo);
-                const rateFactor = isSalePromo ? 1 : (saleBcv / saleParallel);
-                const realRevenueUSD = (sale.actualPaidAmount ?? sale.totalAmount) * rateFactor;
+                const realRevenueUSD = (sale.actualPaidAmount ?? sale.totalAmount);
                 const realProfitUSD = realRevenueUSD - totalCostToDeductUSD;
 
                 if (repairJobSnap?.exists() && repairJobData) {
@@ -182,6 +183,23 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     refundReason,
                     refundPaymentMethod: refundMethod 
                 });
+
+                // Fase 1: revertir la venta en los agregados (0 lecturas).
+                try {
+                    const stats = saleStatsWrites(sale, -1);
+                    transaction.set(
+                        doc(firestore, 'users', user.uid, 'stats_daily', stats.day),
+                        stats.daily,
+                        { merge: true },
+                    );
+                    transaction.set(
+                        doc(firestore, 'users', user.uid, 'stats_monthly', stats.day.slice(0, 7)),
+                        stats.monthly,
+                        { merge: true },
+                    );
+                } catch (statsError) {
+                    console.warn('[reembolso] No se pudieron preparar los agregados:', statsError);
+                }
             });
 
             toast({ title: "Reembolso Procesado" });
@@ -197,7 +215,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
     
     return (
         <div className="flex items-center gap-2">
-            <AdminAuthDialog onAuthorized={() => setIsConfirmOpen(true)}>
+            <AdminAuthDialog actionType="deleteSales" onAuthorized={() => setIsConfirmOpen(true)}>
                 <Button variant="outline" size="sm" className="h-8 text-[10px] font-black uppercase border-destructive/20 text-destructive hover:bg-destructive/5"><Undo2 className="mr-1.5 h-3.5 w-3.5" /> Reembolsar</Button>
             </AdminAuthDialog>
             <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
@@ -239,7 +257,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
     );
 };
 
-export function TransactionList({ sales, isLoading }: TransactionListProps) {
+export function TransactionList({ sales, isLoading, hasMore, isLoadingMore, onLoadMore }: TransactionListProps) {
     const { firestore, user } = useFirebase();
     const { format: formatCurrency, getSymbol, convert, bcvRate: currentBcvRate } = useCurrency();
     const { toast } = useToast();
@@ -248,12 +266,7 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
     const [methodFilter, setMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
     const [searchRef, setSearchRef] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
-
-    const profileRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile } = useDoc<UserProfile>(profileRef);
+    const { profile } = useDashboardStore();
 
     const onReprint = async (sale: Sale) => {
         let repairData = null;
@@ -511,6 +524,21 @@ export function TransactionList({ sales, isLoading }: TransactionListProps) {
                             </AccordionItem>
                         ))}
                     </Accordion>
+                )}
+
+                {onLoadMore && hasMore && (
+                    <div className="flex justify-center pt-2">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={onLoadMore}
+                            disabled={isLoadingMore}
+                            className="h-9 px-4 text-[10px] font-black uppercase tracking-tighter"
+                        >
+                            {isLoadingMore && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                            {hasMore ? 'Cargar 100 más' : 'Historial completo'}
+                        </Button>
+                    </div>
                 )}
 
                 {totalPages > 1 && (

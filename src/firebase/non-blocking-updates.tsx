@@ -16,21 +16,6 @@ import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
 
 /**
- * Helper para actualizar el Documento Guardián de Inventario
- */
-async function updateGuardianMetadata(db: Firestore, userId: string) {
-    try {
-        const guardianRef = doc(db, 'users', userId, 'metadata', 'inventory_status');
-        await setDoc(guardianRef, {
-            lastUpdated: new Date().toISOString(),
-            version: serverTimestamp()
-        }, { merge: true });
-    } catch (e) {
-        console.warn("No se pudo actualizar metadatos del guardián:", e);
-    }
-}
-
-/**
  * Realiza un setDoc con soporte para Metadatos e Invalización
  */
 export async function setDocumentNonBlocking(docRef: DocumentReference, data: any, options: SetOptions) {
@@ -42,15 +27,7 @@ export async function setDocumentNonBlocking(docRef: DocumentReference, data: an
         isDeleted: data.isDeleted ?? false 
     } : data;
 
-    const promise = setDoc(docRef, enrichedData, options);
-    
-    if (isProduct) {
-        // Extraemos el userId de la ruta (users/{userId}/products/{id})
-        const userId = docRef.path.split('/')[1];
-        updateGuardianMetadata(docRef.firestore, userId);
-    }
-
-    return await promise;
+    return await setDoc(docRef, enrichedData, options);
   } catch (error) {
     errorEmitter.emit(
       'permission-error',
@@ -78,11 +55,6 @@ export async function addDocumentNonBlocking(colRef: CollectionReference, data: 
 
     const promise = await addDoc(colRef, enrichedData);
     
-    if (isProduct) {
-        const userId = colRef.path.split('/')[1];
-        updateGuardianMetadata(colRef.firestore, userId);
-    }
-
     return promise;
   } catch (error) {
     errorEmitter.emit(
@@ -110,11 +82,6 @@ export async function updateDocumentNonBlocking(docRef: DocumentReference, data:
 
     const promise = updateDoc(docRef, enrichedData);
 
-    if (isProduct) {
-        const userId = docRef.path.split('/')[1];
-        updateGuardianMetadata(docRef.firestore, userId);
-    }
-
     return await promise;
   } catch (error) {
     errorEmitter.emit(
@@ -138,12 +105,10 @@ export async function deleteDocumentNonBlocking(docRef: DocumentReference) {
     
     if (isProduct) {
         // SOFT DELETE: No borramos físicamente, marcamos como eliminado
-        const userId = docRef.path.split('/')[1];
         const promise = updateDoc(docRef, {
             isDeleted: true,
             updatedAt: serverTimestamp()
         });
-        updateGuardianMetadata(docRef.firestore, userId);
         return await promise;
     } else {
         // Borrado físico estándar para otras colecciones

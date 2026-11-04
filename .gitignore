@@ -43,3 +43,9 @@ next-env.d.ts
 # firebase
 firebase-debug.log
 firestore-debug.log
+
+# tooling local / credenciales (Fase 0)
+/.npm-cache/
+/.tmp-npm/
+service-account*.json
+*-service-account.json

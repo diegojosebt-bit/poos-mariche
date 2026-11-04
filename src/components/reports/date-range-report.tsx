@@ -17,6 +17,7 @@ import { Separator } from "../ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from "../ui/table";
+import { useDailyStatsRange } from '@/lib/firestore/stats-range';
 
 type DateRangeReportProps = {
     sales: Sale[];
@@ -51,23 +52,76 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
         to: endOfDay(new Date()),
     });
 
+    const {
+        stats: rangeAggregate,
+        hasData: hasRangeStats,
+        isLoading: isRangeLoading,
+    } = useDailyStatsRange(date?.from, date?.to || date?.from);
+
     const stats = useMemo(() => {
-        if (!date?.from || !sales || !repairJobs || !products || !settings) {
-            return { 
-                totalSales: 0, 
-                totalProfit: 0, 
-                totalReconciliationDifference: 0, 
-                adjustedTotalSales: 0, 
-                transactionCount: 0, 
-                bsBreakdown: {}, 
-                usdNet: 0,
-                itemsBreakdown: [],
-                totalProductCosts: 0
-            };
-        }
+        const empty = {
+            totalSales: 0,
+            totalProfit: 0,
+            totalReconciliationDifference: 0,
+            adjustedTotalSales: 0,
+            transactionCount: 0,
+            bsBreakdown: {} as Record<string, number>,
+            usdNet: 0,
+            itemsBreakdown: [] as any[],
+            totalProductCosts: 0,
+            dateRangeLabel: '',
+        };
+
+        if (!date?.from || !settings) return empty;
 
         const from = startOfDay(date.from);
         const to = endOfDay(date.to || date.from);
+
+        // Fase 4: totales desde agregados (1 lectura por día del rango).
+        if (hasRangeStats && rangeAggregate) {
+            const bsBreakdown: Record<string, number> = {
+                'Efectivo Bs': rangeAggregate.byMethod.cashBs ?? 0,
+                'Tarjeta': rangeAggregate.byMethod.card ?? 0,
+                'Pago Móvil': rangeAggregate.byMethod.mobile ?? 0,
+                'Transferencia': rangeAggregate.byMethod.transfer ?? 0,
+            };
+            const usdNet = rangeAggregate.byMethod.cashUSD ?? 0;
+
+            const itemsBreakdown = Object.entries(rangeAggregate.items)
+                .map(([key, item]) => ({
+                    key,
+                    name: item.n || key,
+                    quantity: item.q,
+                    totalCost: item.cost,
+                    totalRevenue: item.rev,
+                    profit: item.rev - item.cost,
+                    isRepair: false,
+                    isWarranty: false,
+                }))
+                .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+            const filteredReconciliations = (reconciliations || []).filter(r => {
+                const reconDate = new Date(r.date);
+                return isWithinInterval(reconDate, { start: from, end: to });
+            });
+
+            return {
+                totalSales: rangeAggregate.salesUSD,
+                totalProfit: rangeAggregate.profitUSD,
+                totalReconciliationDifference: filteredReconciliations.reduce((sum, r) => sum + r.totalDifference, 0),
+                adjustedTotalSales: usdNet + convert(Object.values(bsBreakdown).reduce((a, b) => a + b, 0), 'Bs', 'USD'),
+                transactionCount: rangeAggregate.salesCount,
+                bsBreakdown,
+                usdNet,
+                itemsBreakdown,
+                totalProductCosts: rangeAggregate.costUSD,
+                dateRangeLabel: date.to
+                    ? `${format(from, "dd/MM/yy")} al ${format(to, "dd/MM/yy")}`
+                    : format(from, "dd/MM/yy"),
+            };
+        }
+
+        if (!sales || !repairJobs || !products) return empty;
 
         const bsBreakdown: Record<string, number> = { 
             'Efectivo Bs': 0, 
@@ -140,14 +194,24 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
             const itemsTotalBillable = s.items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
             const paymentRatio = itemsTotalBillable > 0 ? totalCollectedNominal / itemsTotalBillable : 1;
 
-            const saleBcv = s.bcvRateAtTime || settings.bcvRate;
-            const saleParallel = s.parallelRateAtTime || settings.parallelRate;
-            const isSalePromo = s.items.some(i => i.isPromo);
-            const rateFactor = isSalePromo ? 1 : (saleBcv / saleParallel);
+            // Análisis de costos congelados en los artículos de esta transacción
+            const itemsWithFrozenCost = s.items.filter(i => {
+                const c = i.costPrice ?? i.customCostPrice;
+                return c !== undefined && c !== null && c > 0;
+            });
+            const frozenCostSum = itemsWithFrozenCost.reduce((acc, i) => acc + ((i.costPrice ?? i.customCostPrice ?? 0) * i.quantity), 0);
+            const remainingSaleCost = typeof s.costPrice === 'number' && s.costPrice > 0 
+                ? Math.max(0, s.costPrice - frozenCostSum) 
+                : 0;
+            const itemsNeedingCost = s.items.filter(i => {
+                const c = i.costPrice ?? i.customCostPrice;
+                return c === undefined || c === null || c <= 0;
+            });
+            const billableOfNeedingCost = itemsNeedingCost.reduce((acc, i) => acc + (i.price * i.quantity), 0);
 
             s.items.forEach(item => {
                 const nominalItemRevenue = (item.price * item.quantity) * paymentRatio;
-                const itemRevenue = nominalItemRevenue * rateFactor;
+                const itemRevenue = nominalItemRevenue;
                 
                 let totalOriginalCost = 0;
                 let key = item.productId;
@@ -158,9 +222,9 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                 // --- MOTOR DE RESCATE HÍBRIDO ---
                 const persistedCost = item.costPrice ?? item.customCostPrice;
 
-                if (persistedCost !== undefined && persistedCost !== null && persistedCost !== 0) {
-                    // Caso A: Venta nueva con costo congelado
-                    totalOriginalCost = persistedCost * item.quantity * paymentRatio;
+                if (persistedCost !== undefined && persistedCost !== null && persistedCost > 0) {
+                    // Caso A: Venta con costo congelado (Inmutable e independiente del precio de cobro)
+                    totalOriginalCost = persistedCost * item.quantity;
                 } else {
                     // Caso B: Venta antigua o sin costo - Rescate desde Memoria Global (RAM)
                     if (item.isRepair) {
@@ -188,9 +252,30 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                         );
                         if (matchedProduct) {
                             const unitCost = matchedProduct.costPrice ?? 0;
-                            totalOriginalCost = unitCost * item.quantity * paymentRatio;
+                            totalOriginalCost = unitCost * item.quantity;
                         } else {
-                            totalOriginalCost = 0; // Si no hay referencia, el costo es 0 (Peor caso)
+                            totalOriginalCost = 0;
+                        }
+                    }
+
+                    // --- FALLBACK MAESTRO (0 LECTURAS): Rescate desde s.costPrice ---
+                    // Si el costo dio 0 (ej. RAM sin cargar catálogo de productos/reparaciones o catálogo desasociado),
+                    // pero la venta registró un costPrice general en su documento raíz de Firestore:
+                    if (totalOriginalCost === 0 && remainingSaleCost > 0) {
+                        if (itemsNeedingCost.length === 1) {
+                            totalOriginalCost = remainingSaleCost;
+                        } else if (billableOfNeedingCost > 0) {
+                            totalOriginalCost = ((item.price * item.quantity) / billableOfNeedingCost) * remainingSaleCost;
+                        } else {
+                            totalOriginalCost = remainingSaleCost / (itemsNeedingCost.length || 1);
+                        }
+                    } else if (totalOriginalCost === 0 && typeof s.costPrice === 'number' && s.costPrice > 0 && frozenCostSum === 0) {
+                        if (s.items.length === 1) {
+                            totalOriginalCost = s.costPrice;
+                        } else if (itemsTotalBillable > 0) {
+                            totalOriginalCost = ((item.price * item.quantity) / itemsTotalBillable) * s.costPrice;
+                        } else {
+                            totalOriginalCost = s.costPrice / s.items.length;
                         }
                     }
                 }
@@ -231,11 +316,7 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
         const totalIncomeFromSales = filteredSales
             .filter(s => s.status === 'completed')
             .reduce((sum, s) => {
-                const saleBcv = s.bcvRateAtTime || settings.bcvRate;
-                const saleParallel = s.parallelRateAtTime || settings.parallelRate;
-                const isSalePromo = s.items.some(i => i.isPromo);
-                const rateFactor = isSalePromo ? 1 : (saleBcv / saleParallel);
-                return sum + ((s.actualPaidAmount ?? s.totalAmount) * rateFactor);
+                return sum + (s.actualPaidAmount ?? s.totalAmount);
             }, 0);
         
         const itemsBreakdown = Array.from(itemsMap.values()).map(item => ({
@@ -266,9 +347,9 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
             dateRangeLabel: date.to ? `${format(from, "dd/MM/yy")} al ${format(to, "dd/MM/yy")}` : format(from, "dd/MM/yy")
         };
 
-    }, [date, sales, products, reconciliations, repairJobs, exchanges, fiados, settings, convert]);
+    }, [date, sales, products, reconciliations, repairJobs, exchanges, fiados, settings, convert, hasRangeStats, rangeAggregate]);
 
-    if (isLoading) return <div className="p-4 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-64 w-full" /></div>;
+    if (isLoading || isRangeLoading) return <div className="p-4 space-y-4"><Skeleton className="h-32 w-full" /><Skeleton className="h-64 w-full" /></div>;
 
     return (
         <div className="space-y-6">
@@ -277,7 +358,7 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                         <div>
                             <CardTitle className="text-xl font-black text-primary">REPORTE DE FLUJO POR PERIODO</CardTitle>
-                            <CardDescription className="text-[10px] font-bold uppercase tracking-widest">Valores ajustados a tasa de reposición para proteger inversión</CardDescription>
+                            <CardDescription className="text-[10px] font-bold uppercase tracking-widest">Resumen detallado de ingresos, costos y utilidad operativa</CardDescription>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                             <Popover>
@@ -296,12 +377,12 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                     
                     <div className="space-y-4">
                         <div className="flex items-center gap-2">
-                            <h3 className="text-xs font-black uppercase text-slate-500 tracking-widest">Flujo de Periodo (Ajustado a Valor Real)</h3>
+                            <h3 className="text-xs font-black uppercase text-slate-500 tracking-widest">Flujo del Periodo</h3>
                             <TooltipProvider>
                                 <Tooltip>
                                     <TooltipTrigger><Info className="w-3.5 h-3.5 text-muted-foreground" /></TooltipTrigger>
                                     <TooltipContent className="max-w-xs">
-                                        <p className="text-[10px]">Muestra cuántos dólares REALES tienes tras ajustar los Bolívares cobrados a BCV contra el costo de reposición.</p>
+                                        <p className="text-[10px]">Muestra los ingresos totales cobrados y el flujo en bolívares y dólares en caja.</p>
                                     </TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
@@ -311,11 +392,11 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                             <Card className="bg-slate-900 text-white border-none shadow-xl overflow-hidden relative">
                                 <div className="absolute right-2 top-2 opacity-10"><DollarSign className="w-16 h-16" /></div>
                                 <CardHeader className="pb-2">
-                                    <CardTitle className="text-[10px] uppercase font-black text-slate-400">Ingreso Neto (Real $)</CardTitle>
+                                    <CardTitle className="text-[10px] uppercase font-black text-slate-400">Ingreso Facturado Total ($)</CardTitle>
                                 </CardHeader>
                                 <CardContent>
                                     <div className="text-3xl font-black">${formatCurrency(stats.totalSales)}</div>
-                                    <p className="text-[9px] text-slate-500 uppercase font-bold mt-1">Valor real de caja para pago de mercancía y comisiones</p>
+                                    <p className="text-[9px] text-slate-500 uppercase font-bold mt-1">Total recaudado en ventas y servicios completados</p>
                                 </CardContent>
                             </Card>
 
@@ -354,13 +435,13 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
 
                     <div>
                         <div className="flex items-center gap-2 mb-4">
-                            <h3 className="text-xs font-black uppercase text-slate-500 tracking-widest flex items-center gap-2"><Sigma className="w-3.5 h-3.5" /> Rendimiento Operativo Real</h3>
-                            <Badge variant="outline" className="text-[9px] border-primary/20 text-primary uppercase">Cálculos a Tasa de Reposición</Badge>
+                            <h3 className="text-xs font-black uppercase text-slate-500 tracking-widest flex items-center gap-2"><Sigma className="w-3.5 h-3.5" /> Rendimiento Operativo</h3>
+                            <Badge variant="outline" className="text-[9px] border-primary/20 text-primary uppercase">Cálculo Real sobre Ventas</Badge>
                         </div>
                         
                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                             <div className="p-4 rounded-xl bg-muted border-l-4 border-l-primary">
-                                <p className="text-[10px] font-bold uppercase text-muted-foreground">Recaudación Real ($)</p>
+                                <p className="text-[10px] font-bold uppercase text-muted-foreground">Recaudación Total ($)</p>
                                 <p className="text-2xl font-black">{getSymbol()}{formatCurrency(stats.totalSales)}</p>
                                 <p className="text-[9px] text-muted-foreground mt-1">{stats.transactionCount} transacciones</p>
                             </div>
@@ -374,7 +455,7 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                                 <p className={cn("text-2xl font-black", stats.totalProfit > 0 ? "text-green-600" : "text-destructive")}>
                                     {getSymbol()}{formatCurrency(stats.totalProfit)}
                                 </p>
-                                <p className="text-[9px] text-muted-foreground mt-1">Base para comisiones</p>
+                                <p className="text-[9px] text-muted-foreground mt-1">Margen neto de ventas</p>
                             </div>
                             <div className="p-4 rounded-xl bg-muted border-l-4 border-l-amber-500">
                                 <p className="text-[10px] font-bold uppercase text-muted-foreground">Dif. Cierres ($)</p>
@@ -398,8 +479,8 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                     <div className="flex items-center gap-2">
                         <ShoppingBag className="w-5 h-5 text-primary" />
                         <div>
-                            <CardTitle className="text-sm font-black uppercase">Desglose de Rentabilidad Real por Artículo</CardTitle>
-                            <CardDescription className="text-[10px]">Valores ajustados a tasa de reposición para cálculo exacto de comisiones.</CardDescription>
+                            <CardTitle className="text-sm font-black uppercase">Desglose de Rentabilidad por Artículo</CardTitle>
+                            <CardDescription className="text-[10px]">Ingresos facturados, costo de inversión y ganancia exacta por producto o servicio.</CardDescription>
                         </div>
                     </div>
                 </CardHeader>
@@ -410,8 +491,8 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                                 <TableHead className="text-[10px] font-black uppercase">Producto / Servicio</TableHead>
                                 <TableHead className="text-center text-[10px] font-black uppercase">Cant.</TableHead>
                                 <TableHead className="text-right text-[10px] font-black uppercase">Costo Inversión ($)</TableHead>
-                                <TableHead className="text-right text-[10px] font-black uppercase">Ingreso Real ($)</TableHead>
-                                <TableHead className="text-right text-[10px] font-black uppercase">Ganancia Real ($)</TableHead>
+                                <TableHead className="text-right text-[10px] font-black uppercase">Ingreso ($)</TableHead>
+                                <TableHead className="text-right text-[10px] font-black uppercase">Ganancia ($)</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -449,7 +530,7 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                         {stats.itemsBreakdown.length > 0 && (
                             <TableFooter className="bg-primary/5 font-black">
                                 <TableRow>
-                                    <TableCell colSpan={2} className="text-[10px] uppercase text-primary">Totales Realistas:</TableCell>
+                                    <TableCell colSpan={2} className="text-[10px] uppercase text-primary">Totales del Periodo:</TableCell>
                                     <TableCell className="text-right text-xs">${formatCurrency(stats.totalProductCosts)}</TableCell>
                                     <TableCell className="text-right text-xs">${formatCurrency(stats.totalSales)}</TableCell>
                                     <TableCell className="text-right">

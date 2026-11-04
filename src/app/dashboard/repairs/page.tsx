@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
-import { PlusCircle, CalendarIcon, X as ClearIcon, Clock, DollarSign, LayoutGrid, ShieldCheck } from "lucide-react";
+import { PlusCircle, CalendarIcon, X as ClearIcon, Clock, DollarSign, LayoutGrid, ShieldCheck, Loader2 } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 import { columns } from "@/components/repairs/columns";
 import { useCollection, useFirebase, useMemoFirebase } from "@/firebase";
@@ -16,21 +16,28 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { RepairFormDialog } from "@/components/repairs/repair-form-dialog";
+import { ExportRepairsDialog } from "@/components/repairs/export-repairs-dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FilterFn } from "@tanstack/react-table";
 import { SecurityGate } from "@/components/security-gate";
+import { useDashboardStore } from "@/contexts/dashboard-context";
+import { usePagedQuery } from '@/lib/firestore/use-paged-query';
+import { useServerSearch } from '@/lib/firestore/use-server-search';
+import { queryCache, type WithId } from '@/lib/firestore/query-cache';
+import { useFeatureFlag } from '@/lib/features';
+import { normalizeText } from '@/lib/search-index';
 
 const repairFilterFn: FilterFn<RepairJob> = (row, columnId, value) => {
-    const term = String(value).toLowerCase();
+    const term = normalizeText(String(value));
     const r = row.original;
     return (
-        (r.customerName || "").toLowerCase().includes(term) ||
-        (r.customerPhone || "").toLowerCase().includes(term) ||
-        (r.customerID || "").toLowerCase().includes(term) ||
-        (r.deviceMake || "").toLowerCase().includes(term) ||
-        (r.deviceModel || "").toLowerCase().includes(term) ||
-        (r.reportedIssue || "").toLowerCase().includes(term) ||
-        (r.id || "").toLowerCase().includes(term)
+        normalizeText(r.customerName).includes(term) ||
+        normalizeText(r.customerPhone).includes(term) ||
+        normalizeText(r.customerID).includes(term) ||
+        normalizeText(r.deviceMake).includes(term) ||
+        normalizeText(r.deviceModel).includes(term) ||
+        normalizeText(r.reportedIssue).includes(term) ||
+        normalizeText(r.id).includes(term)
     );
 };
 
@@ -46,17 +53,80 @@ export default function RepairsPage() {
 
 function RepairsContent() {
     const { firestore, user } = useFirebase();
+    const { profile } = useDashboardStore();
+    const uid = user?.uid ?? '';
+    const usePaged = useFeatureFlag(profile, 'pagedData');
     const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-    // ACOTE DE SEGURIDAD (Blindaje de Costos): Limitamos a 100 registros recientes.
+    // LEGACY (bandera apagada): 100 registros recientes, como hasta ahora.
     const repairJobsQuery = useMemoFirebase(() =>
-        (firestore && user) 
+        (firestore && user && !usePaged) 
             ? query(collection(firestore, 'users', user.uid, 'repair_jobs'), orderBy('createdAt', 'desc'), limit(100)) 
             : null,
-        [firestore, user?.uid]
+        [firestore, user?.uid, usePaged]
     );
-    const { data: repairJobs, isLoading, mutate: mutateRepairs } = useCollection<RepairJob>(repairJobsQuery);
+    const legacy = useCollection<RepairJob>(repairJobsQuery);
+
+    // FASE 2 (bandera encendida): 100 por página + "Cargar 100 más".
+    const paged = usePagedQuery<RepairJob>({
+        collectionName: 'repair_jobs',
+        orderField: 'createdAt',
+        orderDir: 'desc',
+        pageSize: 100,
+        enabled: usePaged,
+    });
+
+    const repairJobs = usePaged ? paged.items : legacy.data;
+    const isLoading = usePaged ? paged.isLoading : legacy.isLoading;
+
+    /** Sustituye al `mutate` del hook legacy cuando la bandera está activa. */
+    const mutateRepairs = useCallback((updater: WithId<RepairJob>[] | ((prev: WithId<RepairJob>[] | null) => WithId<RepairJob>[] | null)) => {
+        if (!usePaged || !uid) {
+            legacy.mutate(updater);
+            return;
+        }
+
+        const current = paged.items;
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        if (!Array.isArray(next)) return;
+
+        const currentById = new Map(current.map((item) => [item.id, item]));
+        const nextIds = new Set(next.map((item) => item.id));
+
+        next.forEach((item) => {
+            if (!item?.id) return;
+            const previous = currentById.get(item.id);
+            if (!previous) {
+                queryCache.mergeIntoCatalog(uid, 'repair_jobs', [item]);
+            } else if (previous !== item) {
+                queryCache.patchItem(uid, 'repair_jobs', item.id, item);
+            }
+        });
+
+        current.forEach((item) => {
+            if (item.id && !nextIds.has(item.id)) {
+                queryCache.removeItem(uid, 'repair_jobs', item.id);
+            }
+        });
+    }, [usePaged, uid, paged.items, legacy.mutate]);
+
+    // Búsqueda en servidor: los resultados se fusionan a la caché de reparaciones.
+    const [searchTerm, setSearchTerm] = useState('');
+    const serverSearchFlag = useFeatureFlag(profile, 'serverSearch');
+    const serverSearch = useServerSearch<RepairJob>({
+        collectionName: 'repair_jobs',
+        term: searchTerm,
+        orderField: 'createdAt',
+        orderDir: 'desc',
+        pageSize: 20,
+        enabled: usePaged && serverSearchFlag,
+        onResults: (found) => queryCache.mergeIntoCatalog(uid, 'repair_jobs', found),
+    });
+    const handleSearchChange = useCallback((value: string) => setSearchTerm(value), []);
+
+    const [editingJob, setEditingJob] = useState<RepairJob | null>(null);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
     const filteredRepairJobs = useMemo(() => {
         if (!repairJobs) return [];
@@ -117,7 +187,16 @@ function RepairsContent() {
                     isLoading={isLoading}
                     filterPlaceholder="Buscar cliente o equipo..."
                     globalFilterFn={repairFilterFn}
-                    meta={{ mutate: mutateRepairs }}
+                    onGlobalFilterChange={handleSearchChange}
+                    isServerSearching={usePaged && serverSearchFlag && serverSearch.isSearching}
+                    searchAddon={<ExportRepairsDialog repairs={repairJobs || []} />}
+                    meta={{ 
+                        mutate: mutateRepairs,
+                        onEditRepair: (job: RepairJob) => {
+                            setEditingJob(job);
+                            setIsEditDialogOpen(true);
+                        }
+                    }}
                 >
                     {(table) => (
                         <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -136,6 +215,38 @@ function RepairsContent() {
                         </div>
                     )}
                 </DataTable>
+
+                {usePaged && (
+                    <div className="flex items-center justify-center gap-3 pt-1">
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                            {repairJobs?.length || 0} reparaciones cargadas
+                        </span>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => { void paged.loadMore(); }}
+                            disabled={!paged.hasMore || paged.isLoadingMore}
+                            className="h-8 text-xs font-semibold gap-1.5"
+                        >
+                            {paged.isLoadingMore
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <PlusCircle className="w-3.5 h-3.5" />}
+                            {paged.hasMore ? 'Cargar 100 más' : 'Historial completo'}
+                        </Button>
+                    </div>
+                )}
+
+                {editingJob && (
+                    <RepairFormDialog 
+                        repairJob={editingJob} 
+                        isOpen={isEditDialogOpen} 
+                        onOpenChange={(open) => {
+                            setIsEditDialogOpen(open);
+                            if (!open) setEditingJob(null);
+                        }} 
+                        onSaved={handleOptimisticUpdate} 
+                    />
+                )}
             </main>
         </>
     )

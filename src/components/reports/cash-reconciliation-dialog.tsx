@@ -22,12 +22,20 @@ type CashReconciliationDialogProps = {
   openSales: Sale[];
 };
 
-const paymentMethodsOrder: PaymentMethod[] = ['Efectivo USD', 'Efectivo Bs', 'Tarjeta', 'Pago Móvil', 'Transferencia', 'USDT / Crypto'];
+const paymentMethodsOrder: PaymentMethod[] = [
+  'Efectivo USD',
+  'Efectivo Bs',
+  'Tarjeta',
+  'Pago Móvil',
+  'Transferencia',
+  'Tarjeta / Pago Móvil',
+  'USDT / Crypto',
+];
 
 export function CashReconciliationDialog({ openSales }: CashReconciliationDialogProps) {
   const { firestore, user } = useFirebase();
   const { toast } = useToast();
-  const { updateCachedItem, addItemToCache } = useDashboardStore();
+  const { updateCachedItem, addItemToCache, setSettings, settings } = useDashboardStore();
   const currency = useCurrency();
   const { format: formatCurrency, getSymbol, convert } = currency;
   const [isOpen, setIsOpen] = useState(false);
@@ -40,14 +48,11 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     'Tarjeta': 0,
     'Pago Móvil': 0,
     'Transferencia': 0,
+    'Tarjeta / Pago Móvil': 0,
     'USDT / Crypto': 0,
   });
 
-  const profileRef = useMemoFirebase(() => 
-    (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-    [firestore, user?.uid]
-  );
-  const { data: profile } = useDoc<UserProfile>(profileRef);
+  const { profile } = useDashboardStore();
 
   const {
     expectedAmounts,
@@ -62,6 +67,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       'Tarjeta': 0,
       'Pago Móvil': 0,
       'Transferencia': 0,
+      'Tarjeta / Pago Móvil': 0,
       'USDT / Crypto': 0,
     };
     let paymentsUSD = 0;
@@ -77,15 +83,15 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
         if (totals[payment.method] !== undefined) {
           totals[payment.method] += payment.amount;
         }
-        // Usamos tasa de reposición (true) para la reconciliación del cajón
-        paymentsUSD += (payment.method === 'Efectivo USD' || payment.method === 'USDT / Crypto') ? payment.amount : convert(payment.amount, 'Bs', 'USD', true);
+        // Conversión a valor oficial BCV
+        paymentsUSD += (payment.method === 'Efectivo USD' || payment.method === 'USDT / Crypto') ? payment.amount : convert(payment.amount, 'Bs', 'USD', false);
       });
       if (sale.changeGiven) {
           sale.changeGiven.forEach(change => {
               if (totals[change.method] !== undefined) {
                   totals[change.method] -= change.amount;
               }
-              changeUSD += (change.method === 'Efectivo USD' || change.method === 'USDT / Crypto') ? change.amount : convert(change.amount, 'Bs', 'USD', true);
+              changeUSD += (change.method === 'Efectivo USD' || change.method === 'USDT / Crypto') ? change.amount : convert(change.amount, 'Bs', 'USD', false);
           });
       }
     });
@@ -114,8 +120,8 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
         if (typedMethod === 'Efectivo USD' || typedMethod === 'USDT / Crypto') {
             return acc + amount;
         }
-        // Valuamos lo contado físicamente contra la tasa de reposición
-        return acc + convert(amount, 'Bs', 'USD', true);
+        // Valuamos lo contado físicamente contra la tasa oficial BCV
+        return acc + convert(amount, 'Bs', 'USD', false);
      }, 0)
   }, [countedAmounts, convert]);
 
@@ -136,6 +142,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       'Tarjeta': 0,
       'Pago Móvil': 0,
       'Transferencia': 0,
+      'Tarjeta / Pago Móvil': 0,
       'USDT / Crypto': 0,
     });
   };
@@ -156,8 +163,10 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     setIsClosing(true);
 
     const now = new Date();
+    const nowIso = now.toISOString();
     const todayStr = formatDate(now, 'yyyy-MM-dd');
     const reconciliationId = `RECON-${todayStr}-${now.getTime()}`;
+    const updatedInitialBalances = { ...countedAmounts };
     
     const batch = writeBatch(firestore);
     const reconciliationRef = doc(firestore, 'users', user.uid, 'daily_reconciliations', reconciliationId);
@@ -178,7 +187,7 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       date: todayStr,
       totalSales: totalSalesValue,
       totalTransactions: transactionCount,
-      closedAt: now.toISOString(),
+      closedAt: nowIso,
       paymentMethods: paymentMethodDetails,
       totalExpected: netExpectedInUSD,
       totalCounted: totalCountedInUSD,
@@ -189,21 +198,47 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
     };
     batch.set(reconciliationRef, newReconciliation);
 
+    const settingsRef = doc(firestore, 'users', user.uid, 'app-settings', 'main');
+    batch.set(settingsRef, {
+      balancesUpdatedAt: nowIso,
+      initialBalances: updatedInitialBalances,
+    }, { merge: true });
+
+    const BATCH_LIMIT = 400;
+    const batches = [batch];
+    let currentBatch = batch;
+    let operationCount = 2; // reconciliationRef and settingsRef
+
     openSales.forEach(sale => {
+      if (operationCount >= BATCH_LIMIT) {
+        currentBatch = writeBatch(firestore);
+        batches.push(currentBatch);
+        operationCount = 0;
+      }
       const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', sale.id!);
-      batch.update(saleRef, { reconciliationId: reconciliationId });
+      currentBatch.update(saleRef, { reconciliationId: reconciliationId });
+      operationCount++;
     });
 
     try {
-      await batch.commit();
+      await Promise.all(batches.map(b => b.commit()));
 
-      // INYECCIÓN ATÓMICA EN MEMORIA (Reactividad Instantánea 0ms)
+      // INYECCIÓN ATÓMICA EN MEMORIA (Reactividad Instantánea 0ms - Sin lecturas)
       // 1. Marcamos las ventas como conciliadas en el caché global para que desaparezcan de la vista "Abierta"
       openSales.forEach(sale => {
           updateCachedItem(sale.id!, { reconciliationId: reconciliationId });
       });
       // 2. Añadimos el nuevo reporte de cierre al historial en memoria
       addItemToCache('daily_reconciliations', newReconciliation);
+
+      // 3. Actualizamos las configuraciones y los saldos iniciales en el estado global de la app
+      if (settings) {
+          setSettings({
+              ...settings,
+              balancesUpdatedAt: nowIso,
+              initialBalances: updatedInitialBalances,
+          });
+      }
 
       toast({ title: "Caja Cerrada", description: `Se procesaron ${transactionCount} transacciones.` });
       setCompletedReconciliation(newReconciliation);

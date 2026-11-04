@@ -7,6 +7,15 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  async redirects() {
+    return [
+      {
+        source: '/',
+        destination: '/dashboard/pos',
+        permanent: false,
+      },
+    ];
+  },
   images: {
     remotePatterns: [
       {

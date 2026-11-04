@@ -1,5 +1,6 @@
 "use client";
 
+import { safeJsonStringify, cleanObject } from "@/lib/json-guard";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -45,7 +46,8 @@ export function HeldSalesSheet({ heldSales }: HeldSalesSheetProps) {
         // Al restaurar, removemos de la lista global de espera (0ms)
         removeCachedItem(sale.id);
         
-        const itemsParam = encodeURIComponent(JSON.stringify(sale.items));
+        const cleanItems = cleanObject(sale.items || []);
+        const itemsParam = encodeURIComponent(safeJsonStringify(cleanItems));
         router.push(`/dashboard/pos?restoredSaleId=${sale.id}&items=${itemsParam}`);
     };
     

@@ -1,24 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Query,
   getDocs,
   DocumentData,
   FirestoreError,
   CollectionReference,
-  getDocFromServer,
-  doc,
   getDocsFromCache,
   getDocsFromServer,
-  where,
-  query,
-  Timestamp
 } from 'firebase/firestore';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 import { useDashboardStore } from '@/contexts/dashboard-context';
 import { useFirebase } from '@/firebase';
+import { serializeValue } from '@/lib/firestore/cache-policy';
+import { countCacheHits, countServerReads } from '@/lib/firestore/read-meter';
 
 export type WithId<T> = T & { id: string };
 
@@ -30,183 +25,233 @@ export interface UseCollectionResult<T> {
   mutate: (updater: WithId<T>[] | ((prev: WithId<T>[] | null) => WithId<T>[] | null)) => void;
 }
 
-export interface InternalQuery extends Query<DocumentData> {
-  _query: {
-    path: {
-      canonicalString(): string;
-      toString(): string;
+// Mapa para deduplicar consultas idénticas en vuelo (evita lecturas duplicadas simultáneas)
+const pendingQueries = new Map<string, Promise<any[]>>();
+
+function getSafePath(query: any): string {
+  if (!query) return '';
+  try {
+    if (query.type === 'collection') {
+      return (query as CollectionReference).path || 'collection';
     }
+
+    const internal = (query as any)._query ?? query;
+    const path = internal?.path;
+
+    if (path) {
+      if (typeof path.canonicalString === 'function') return path.canonicalString();
+      if (Array.isArray(path.segments)) return path.segments.join('/');
+      if (typeof path.toString === 'function') return path.toString();
+    }
+
+    return (query as any).path || 'unknown_path';
+  } catch {
+    return 'unknown_path';
+  }
+}
+
+function getQueryCacheKey(query: any): string {
+  if (!query) return '';
+  try {
+    if (query.type === 'collection') {
+      return `collection_cache:${(query as CollectionReference).path}`;
+    }
+    
+    const path = getSafePath(query);
+    const queryInternal = (query as any)._query || {};
+    const limitVal = queryInternal.limit ?? 'none';
+    
+    let orderFields = '';
+    if (Array.isArray(queryInternal.explicitOrderBy)) {
+      orderFields = queryInternal.explicitOrderBy.map((o: any) => {
+        const field = o?.field?.canonicalString?.() || o?.field?.toString?.() || 'field';
+        const dir = o?.dir || 'asc';
+        return `${field}_${dir}`;
+      }).join('|');
+    }
+
+    let filterSummary = '';
+    if (Array.isArray(queryInternal.filters)) {
+      filterSummary = queryInternal.filters.map((f: any) => {
+        const field = f?.field?.canonicalString?.() || f?.field?.toString?.() || 'field';
+        const op = f?.op || 'op';
+        // Antes: los Timestamps/Date caían en 'val' y dos rangos distintos
+        // compartían la misma clave de caché (datos incorrectos).
+        return `${field}_${op}_${serializeValue(f?.value)}`;
+      }).join('&');
+    }
+
+    return `collection_cache:v2:${path}:limit_${limitVal}:orders_${orderFields}:filters_${filterSummary}`;
+  } catch (e) {
+    return 'unknown_query_key';
   }
 }
 
 /**
- * Función para generar una clave de caché única basada en la consulta de Firestore.
- */
-function getQueryCacheKey(query: any): string {
-    if (!query) return '';
-    try {
-        const path = query.type === 'collection' 
-            ? (query as CollectionReference).path 
-            : (query as unknown as InternalQuery)._query.path.canonicalString();
-        
-        const queryInternal = (query as any)._query || {};
-        const signature = JSON.stringify({
-            filters: queryInternal.filters || [],
-            orders: queryInternal.explicitOrderBy || [],
-            limit: queryInternal.limit || null
-        });
-
-        return `collection_cache:${path}:${signature}`;
-    } catch (e) {
-        return 'unknown_query_key';
-    }
-}
-
-/**
- * useCollection - Hook Inteligente con Delta Sync y Patrón Guardián
+ * useCollection - Hook Ultra Optimizado (Blindaje Antifuga de Lecturas Firebase)
+ * 1. Prioriza memoria RAM (0ms, 0 lecturas).
+ * 2. Prioriza caché local IndexedDB (0 lecturas a la cuota diaria).
+ * 3. Deduplica llamadas en vuelo para no duplicar peticiones de la misma colección.
+ * 4. No entra en ciclos recursivos al actualizar el estado.
  */
 export function useCollection<T = any>(
-    memoizedTargetRefOrQuery: ((CollectionReference<DocumentData> | Query<DocumentData>) & {__memo?: boolean})  | null | undefined,
+  memoizedTargetRefOrQuery: ((CollectionReference<DocumentData> | Query<DocumentData>) & {__memo?: boolean}) | null | undefined,
 ): UseCollectionResult<T> {
   type ResultItemType = WithId<T>;
   const { dataCache, setCachedData } = useDashboardStore();
   const { firestore, user } = useFirebase();
-  
+  const isMountedRef = useRef(true);
+  const dataCacheRef = useRef(dataCache);
+  dataCacheRef.current = dataCache;
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const queryKey = useMemo(() => getQueryCacheKey(memoizedTargetRefOrQuery), [memoizedTargetRefOrQuery]);
   const data = (queryKey ? dataCache[queryKey] : null) as ResultItemType[] | null;
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(!data);
   const [error, setError] = useState<FirestoreError | Error | null>(null);
 
   const mutate = useCallback((updater: ResultItemType[] | ((prev: ResultItemType[] | null) => ResultItemType[] | null)) => {
     if (!queryKey) return;
-    const newData = typeof updater === 'function' ? updater(data) : updater;
+    const current = dataCacheRef.current[queryKey] as ResultItemType[] | null;
+    const newData = typeof updater === 'function' ? updater(current) : updater;
     setCachedData(queryKey, newData);
-  }, [queryKey, data, setCachedData]);
+  }, [queryKey, setCachedData]);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceServer = false) => {
     if (!memoizedTargetRefOrQuery || !queryKey || !firestore || !user) {
-      if (!memoizedTargetRefOrQuery) setIsLoading(false);
+      if (!memoizedTargetRefOrQuery && isMountedRef.current) setIsLoading(false);
       return;
     }
 
-    // 1. VERIFICACIÓN RAM (Caché de nivel 1 - 0ms)
-    if (dataCache[queryKey] !== undefined && dataCache[queryKey] !== null) {
-        return;
+    // NIVEL 1: Memoria RAM (0 lecturas, 0ms)
+    if (!forceServer && dataCacheRef.current[queryKey] !== undefined && dataCacheRef.current[queryKey] !== null) {
+      if (isMountedRef.current) setIsLoading(false);
+      return;
     }
 
-    setIsLoading(true);
-    setError(null);
+    // Deduplicación en vuelo: Si otra llamada ya está consultando esta clave, esperar
+    if (!forceServer && pendingQueries.has(queryKey)) {
+      const pending = pendingQueries.get(queryKey);
+      if (pending) {
+        try {
+          const cached = await pending;
+          if (isMountedRef.current) {
+            setCachedData(queryKey, cached ?? []);
+            setIsLoading(false);
+          }
+          return;
+        } catch (e) {}
+      }
+    }
 
-    const path = memoizedTargetRefOrQuery.type === 'collection'
-        ? (memoizedTargetRefOrQuery as CollectionReference).path
-        : (memoizedTargetRefOrQuery as unknown as InternalQuery)._query.path.canonicalString();
+    if (isMountedRef.current && !dataCacheRef.current[queryKey]) {
+      setIsLoading(true);
+      setError(null);
+    }
+
+    const queryPromise = (async () => {
+      let results: ResultItemType[] = [];
+      const label = getSafePath(memoizedTargetRefOrQuery) || 'query';
+
+      // NIVEL 2: Intentar primero desde Caché Local (IndexedDB) con 0 Lecturas al servidor de Firebase
+      if (!forceServer) {
+        try {
+          const cacheSnap = await getDocsFromCache(memoizedTargetRefOrQuery);
+          if (!cacheSnap.empty) {
+            countCacheHits(cacheSnap.size, label);
+            cacheSnap.forEach((doc) => {
+              const item = doc.data() as any;
+              if (!item.isDeleted) {
+                results.push({ ...item, id: doc.id });
+              }
+            });
+            return results;
+          }
+        } catch (cacheErr) {
+          // Si no está en caché o es la primera carga, continuamos a la red
+        }
+      }
+
+      // NIVEL 3: Servidor (Solo si no estaba en caché o si se fuerza refetch)
+      try {
+        const snapshot = forceServer 
+          ? await getDocsFromServer(memoizedTargetRefOrQuery) 
+          : await getDocs(memoizedTargetRefOrQuery);
+
+        // Firestore factura 1 lectura por documento devuelto; una consulta
+        // vacía cuesta 1. Este contador es solo para diagnóstico.
+        countServerReads(Math.max(1, snapshot.size), label);
+
+        results = [];
+        snapshot.forEach((doc) => {
+          const item = doc.data() as any;
+          if (!item.isDeleted) {
+            results.push({ ...item, id: doc.id });
+          }
+        });
+        return results;
+      } catch (serverErr: any) {
+        console.warn("Firestore fetch error:", serverErr?.code || serverErr?.message);
+        
+        // Si el servidor falla (ej. cuota diaria de 50k agotada o sin conexión), rescatar de IndexedDB
+        try {
+          const emergencyCacheSnap = await getDocsFromCache(memoizedTargetRefOrQuery);
+          if (!emergencyCacheSnap.empty) {
+            countCacheHits(emergencyCacheSnap.size, label);
+            results = [];
+            emergencyCacheSnap.forEach((doc) => {
+              const item = doc.data() as any;
+              if (!item.isDeleted) {
+                results.push({ ...item, id: doc.id });
+              }
+            });
+            return results;
+          }
+        } catch (e) {}
+        
+        throw serverErr;
+      }
+    })();
+
+    pendingQueries.set(queryKey, queryPromise);
 
     try {
-      let results: ResultItemType[] = [];
-
-      // 2. PATRÓN DE DOCUMENTO GUARDIÁN (Solo para Inventario)
-      if (path.includes('/products')) {
-          const syncKey = `last_sync_products_${user.uid}`;
-          const localTimestamp = localStorage.getItem(syncKey);
-          const guardianRef = doc(firestore, 'users', user.uid, 'metadata', 'inventory_status');
-
-          try {
-              // Consultamos solo 1 documento de metadatos (1 lectura)
-              const guardianSnap = await getDocFromServer(guardianRef);
-              const serverTimestamp = guardianSnap.exists() ? guardianSnap.data().lastUpdated : null;
-
-              if (serverTimestamp && localTimestamp === serverTimestamp) {
-                  // VERSIONES COINCIDEN: Carga instantánea desde disco local
-                  const cacheSnapshot = await getDocsFromCache(memoizedTargetRefOrQuery);
-                  cacheSnapshot.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-              } else if (serverTimestamp && localTimestamp) {
-                  // DELTA SYNC: Intentar descargar solo lo nuevo desde el último timestamp local
-                  try {
-                      const mergedMap = new Map<string, any>();
-                      
-                      // Cargar base desde caché (0 lecturas)
-                      const cacheSnap = await getDocsFromCache(memoizedTargetRefOrQuery);
-                      cacheSnap.forEach(d => mergedMap.set(d.id, d.data()));
-
-                      // Pedir solo el "Delta" (documentos modificados después de localTimestamp)
-                      const lastSyncDate = new Date(localTimestamp);
-                      const deltaQuery = query(memoizedTargetRefOrQuery, where('updatedAt', '>', lastSyncDate));
-                      const deltaSnap = await getDocsFromServer(deltaQuery);
-                      
-                      deltaSnap.forEach(d => mergedMap.set(d.id, d.data()));
-
-                      // Reconstruir lista filtrando eliminados
-                      results = Array.from(mergedMap.entries())
-                        .map(([id, data]) => ({ ...data, id }))
-                        .filter(p => !p.isDeleted);
-
-                      localStorage.setItem(syncKey, serverTimestamp);
-                  } catch (deltaErr) {
-                      // FALLBACK: Si falta índice o falla Delta, descarga completa de seguridad
-                      const fullSnap = await getDocsFromServer(memoizedTargetRefOrQuery);
-                      fullSnap.forEach(doc => {
-                          const p = doc.data() as any;
-                          if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                      });
-                      localStorage.setItem(syncKey, serverTimestamp);
-                  }
-              } else {
-                  // PRIMERA CARGA: Descarga completa inicial
-                  const serverSnapshot = await getDocsFromServer(memoizedTargetRefOrQuery);
-                  serverSnapshot.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-                  if (serverTimestamp) localStorage.setItem(syncKey, serverTimestamp);
-              }
-          } catch (guardianErr) {
-              // FALLBACK OFFLINE: Si falla el guardián, intentar caché y luego servidor
-              try {
-                  const snap = await getDocsFromCache(memoizedTargetRefOrQuery);
-                  snap.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-              } catch {
-                  const snap = await getDocsFromServer(memoizedTargetRefOrQuery);
-                  snap.forEach(doc => {
-                      const p = doc.data() as any;
-                      if (!p.isDeleted) results.push({ ...p, id: doc.id });
-                  });
-              }
-          }
-      } else {
-          // 3. LOGICA ESTANDAR PARA OTRAS COLECCIONES
-          const snapshot = await getDocs(memoizedTargetRefOrQuery);
-          snapshot.forEach((doc) => {
-            results.push({ ...(doc.data() as T), id: doc.id });
-          });
+      const finalResults = await queryPromise;
+      if (isMountedRef.current) {
+        setCachedData(queryKey, finalResults);
       }
-      
-      setCachedData(queryKey, results);
     } catch (err: any) {
-      console.error("Fetch error:", err);
-      const contextualError = new FirestorePermissionError({
-        operation: 'list',
-        path,
-      });
-      setError(contextualError);
-      errorEmitter.emit('permission-error', contextualError);
+      if (isMountedRef.current) {
+        // Solo registrar error si no tenemos datos en memoria
+        if (!dataCacheRef.current[queryKey]) {
+          setError(err);
+        }
+      }
     } finally {
-      setIsLoading(false);
+      pendingQueries.delete(queryKey);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [memoizedTargetRefOrQuery, queryKey, dataCache, setCachedData, firestore, user]);
+  }, [memoizedTargetRefOrQuery, queryKey, setCachedData, firestore, user]);
+
+  const refetch = useCallback(async () => {
+    await fetchData(true);
+  }, [fetchData]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  if(memoizedTargetRefOrQuery && !memoizedTargetRefOrQuery.__memo) {
+  if (memoizedTargetRefOrQuery && !memoizedTargetRefOrQuery.__memo) {
     throw new Error(memoizedTargetRefOrQuery + ' was not properly memoized using useMemoFirebase');
   }
 
-  return { data, isLoading, error, refetch: fetchData, mutate };
+  return { data, isLoading, error, refetch, mutate };
 }

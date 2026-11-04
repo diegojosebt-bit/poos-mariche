@@ -1,8 +1,14 @@
 "use client";
 
+import { cleanObject } from "@/lib/json-guard";
 import { PageHeader } from "@/components/page-header";
-import { useCollection, useFirebase, useMemoFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase";
-import { collection, doc, query, orderBy, runTransaction } from "firebase/firestore";
+import { useCollection, useDoc, useFirebase, useMemoFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase";
+import { collection, doc, query, orderBy, limit, runTransaction, setDoc } from "firebase/firestore";
+import { fiadoOverviewWrites, overviewRef } from '@/lib/firestore/rollups';
+import { usePagedQuery } from '@/lib/firestore/use-paged-query';
+import { queryCache, type WithId } from '@/lib/firestore/query-cache';
+import { useFeatureFlag } from '@/lib/features';
+import { useDashboardStore } from '@/contexts/dashboard-context';
 import type { Fiado, Sale, Payment, Product, FiadoItem, RepairJob, PaymentMethod } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,8 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useMemo, useEffect } from "react";
-import { PlusCircle, HandCoins, DollarSign, Trash2, Search, PackageSearch, X, Plus, ShoppingCart, List, Clock, AlertTriangle, UserCheck, Calendar as CalendarIcon, Smartphone, CreditCard, Landmark, Banknote } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { PlusCircle, HandCoins, DollarSign, Trash2, Search, PackageSearch, X, Plus, ShoppingCart, List, Clock, AlertTriangle, UserCheck, Calendar as CalendarIcon, Smartphone, CreditCard, Landmark, Banknote, TicketPercent, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { format, parseISO, differenceInDays, isBefore, isToday, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -24,24 +30,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SecurityGate } from "@/components/security-gate";
-
-// Función de utilidad para limpiar objetos de valores undefined antes de enviar a Firestore
-function cleanObject(obj: any): any {
-    if (obj === null || obj === undefined) return obj;
-    const cleaned = { ...obj };
-    Object.keys(cleaned).forEach(key => {
-        if (cleaned[key] === undefined) {
-            delete cleaned[key];
-        } else if (Array.isArray(cleaned[key])) {
-            cleaned[key] = cleaned[key].map((item: any) => 
-                (typeof item === 'object' && item !== null) ? cleanObject(item) : item
-            );
-        } else if (typeof cleaned[key] === 'object' && cleaned[key] !== null) {
-            cleaned[key] = cleanObject(cleaned[key]);
-        }
-    });
-    return cleaned;
-}
 
 const paymentMethodOptions: { value: PaymentMethod, label: string, icon: any, hasReference: boolean, isBs: boolean }[] = [
     { value: 'Efectivo USD', label: 'Efectivo USD', icon: DollarSign, hasReference: false, isBs: false },
@@ -69,18 +57,75 @@ function FiadosContent() {
     const { firestore, user } = useFirebase();
     const { toast } = useToast();
     const { format: formatCurrency, getSymbol } = useCurrency();
+    const { profile } = useDashboardStore();
+    const uid = user?.uid ?? '';
+    const usePaged = useFeatureFlag(profile, 'pagedData');
     const [searchTerm, setSearchTerm] = useState("");
     const [isAddOpen, setIsAddOpen] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
 
+    // LEGACY (bandera apagada): todos los fiados, como hasta ahora.
     const fiadosCollection = useMemoFirebase(() => 
-        (firestore && user) ? query(collection(firestore, "users", user.uid, "fiados"), orderBy("createdAt", "desc")) : null,
-        [firestore, user?.uid]
+        (firestore && user && !usePaged) ? query(collection(firestore, "users", user.uid, "fiados"), orderBy("createdAt", "desc")) : null,
+        [firestore, user?.uid, usePaged]
     );
-    const { data: fiados, isLoading, mutate: mutateFiados } = useCollection<Fiado>(fiadosCollection);
+    const legacy = useCollection<Fiado>(fiadosCollection);
+
+    // FASE 2: 50 por página + "Cargar 50 más".
+    const paged = usePagedQuery<Fiado>({
+        collectionName: 'fiados',
+        orderField: 'createdAt',
+        orderDir: 'desc',
+        pageSize: 50,
+        enabled: usePaged,
+    });
+
+    const fiados = usePaged ? paged.items : legacy.data;
+    const isLoading = usePaged ? paged.isLoading : legacy.isLoading;
+
+    // El "total en la calle" sale de stats/overview (1 lectura), no de la lista.
+    const overviewDocRef = useMemoFirebase(() =>
+        (firestore && user && usePaged) ? doc(firestore, 'users', user.uid, 'stats', 'overview') : null,
+        [firestore, user?.uid, usePaged]
+    );
+    const { data: overview } = useDoc<{ fiados?: { pendingAmount?: number } }>(overviewDocRef);
+
+    /** Sustituye al `mutate` del hook legacy cuando la bandera está activa. */
+    const mutateFiados = useCallback((updater: WithId<Fiado>[] | ((prev: WithId<Fiado>[] | null) => WithId<Fiado>[] | null)) => {
+        if (!usePaged || !uid) {
+            legacy.mutate(updater);
+            return;
+        }
+
+        const current = paged.items;
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        if (!Array.isArray(next)) return;
+
+        const currentById = new Map(current.map((item) => [item.id, item]));
+        const nextIds = new Set(next.map((item) => item.id));
+
+        next.forEach((item) => {
+            if (!item?.id) return;
+            const previous = currentById.get(item.id);
+            if (!previous) {
+                queryCache.mergeIntoCatalog(uid, 'fiados', [item]);
+            } else if (previous !== item) {
+                queryCache.patchItem(uid, 'fiados', item.id, item);
+            }
+        });
+
+        current.forEach((item) => {
+            if (item.id && !nextIds.has(item.id)) {
+                queryCache.removeItem(uid, 'fiados', item.id);
+            }
+        });
+    }, [usePaged, uid, paged.items, legacy.mutate]);
 
     const filteredFiados = useMemo(() => {
         if (!fiados) return [];
-        const term = searchTerm.toLowerCase();
+        const term = searchTerm.toLowerCase().trim();
+        if (!term) return fiados;
         return fiados.filter(f => 
             f.customerName.toLowerCase().includes(term) || 
             f.customerID.toLowerCase().includes(term) ||
@@ -88,28 +133,67 @@ function FiadosContent() {
         );
     }, [fiados, searchTerm]);
 
+    // Reset to first page when search changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredFiados.length / ITEMS_PER_PAGE));
+
+    const paginatedFiados = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filteredFiados.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [filteredFiados, currentPage, ITEMS_PER_PAGE]);
+
     const activeDebt = useMemo(() => {
+        if (usePaged && typeof overview?.fiados?.pendingAmount === 'number') {
+            return overview.fiados.pendingAmount;
+        }
         if (!fiados) return 0;
         return fiados.filter(f => f.status === 'Pendiente').reduce((sum, f) => sum + (f.totalAmount - f.amountPaid), 0);
-    }, [fiados]);
+    }, [fiados, usePaged, overview]);
+
+    const pendingOf = (fiado: Fiado) => Math.max(0, (fiado.totalAmount || 0) - (fiado.amountPaid || 0));
+
+    /** Fase 1: mantiene el pendiente total en `stats/overview` (0 lecturas). */
+    const applyFiadoStats = (prevPending: number, nextPending: number) => {
+        if (!firestore || !user) return;
+        try {
+            void setDoc(
+                overviewRef(firestore, user.uid),
+                fiadoOverviewWrites(prevPending, nextPending),
+                { merge: true },
+            ).catch(() => {});
+        } catch (error) {
+            console.warn('[fiados] No se pudieron preparar los agregados:', error);
+        }
+    };
 
     const handleDeleteFiado = (id: string) => {
         if (!firestore || !user) return;
-        
+
+        const fiado = fiados?.find(f => f.id === id);
+
         // Optimistic delete
         mutateFiados((prev) => prev?.filter(f => f.id !== id) || null);
         
         deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'fiados', id));
+
+        if (fiado) applyFiadoStats(pendingOf(fiado), 0);
+
         toast({ title: "Registro eliminado", variant: "destructive" });
     };
 
     const handleFiadoAdded = (newFiado: Fiado) => {
         mutateFiados((prev) => [newFiado as any, ...(prev || [])]);
+        applyFiadoStats(0, pendingOf(newFiado));
         setIsAddOpen(false);
     };
 
     const handleFiadoUpdated = (updatedFiado: Fiado) => {
+        const previous = fiados?.find(f => f.id === updatedFiado.id);
         mutateFiados((prev) => prev?.map(f => f.id === updatedFiado.id ? { ...f, ...updatedFiado } : f) || null);
+        if (previous) applyFiadoStats(pendingOf(previous), pendingOf(updatedFiado));
     };
 
     return (
@@ -165,9 +249,9 @@ function FiadosContent() {
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow><TableCell colSpan={8} className="text-center py-10">Cargando créditos...</TableCell></TableRow>
-                                ) : filteredFiados.length === 0 ? (
+                                ) : paginatedFiados.length === 0 ? (
                                     <TableRow><TableCell colSpan={8} className="text-center py-10 text-muted-foreground">No hay registros que coincidan.</TableCell></TableRow>
-                                ) : filteredFiados.map((fiado) => {
+                                ) : paginatedFiados.map((fiado) => {
                                     const pending = fiado.totalAmount - fiado.amountPaid;
                                     const daysOld = differenceInDays(new Date(), parseISO(fiado.createdAt));
                                     
@@ -190,7 +274,10 @@ function FiadosContent() {
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <span className="font-bold text-sm">{fiado.customerName}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-sm">{fiado.customerName}</span>
+                                                        {fiado.isPromo && <Badge className="bg-blue-600 text-[8px] h-3 px-1">PROMO</Badge>}
+                                                    </div>
                                                     <span className="text-[10px] text-muted-foreground">{fiado.customerID}</span>
                                                 </div>
                                             </TableCell>
@@ -258,7 +345,7 @@ function FiadosContent() {
                                                             <CobrarFiadoDialog fiado={fiado} onUpdated={handleFiadoUpdated} />
                                                         </>
                                                     )}
-                                                    <AdminAuthDialog onAuthorized={() => handleDeleteFiado(fiado.id!)}>
+                                                    <AdminAuthDialog actionType="deleteFiados" onAuthorized={() => handleDeleteFiado(fiado.id!)}>
                                                         <Button size="sm" variant="ghost" className="h-8 text-destructive">
                                                             <Trash2 className="w-3.5 h-3.5" />
                                                         </Button>
@@ -271,6 +358,55 @@ function FiadosContent() {
                             </TableBody>
                         </Table>
                     </CardContent>
+                    {filteredFiados.length > 0 && (
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t bg-slate-50/50 text-xs text-muted-foreground">
+                            <div>
+                                Mostrando <span className="font-bold text-slate-800">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> a <span className="font-bold text-slate-800">{Math.min(currentPage * ITEMS_PER_PAGE, filteredFiados.length)}</span> de <span className="font-bold text-slate-800">{filteredFiados.length}</span> créditos
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs font-bold"
+                                    disabled={currentPage === 1}
+                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                >
+                                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+                                </Button>
+                                <span className="font-bold text-slate-800 px-2">
+                                    Página {currentPage} de {totalPages}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs font-bold"
+                                    disabled={currentPage >= totalPages}
+                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                >
+                                    Siguiente <ChevronRight className="h-4 w-4 ml-1" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                {usePaged && (
+                    <div className="flex items-center justify-center gap-3 pt-3 border-t">
+                        <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                            {fiados?.length || 0} fiados cargados
+                        </span>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 px-2 text-xs font-bold gap-1.5"
+                            onClick={() => { void paged.loadMore(); }}
+                            disabled={!paged.hasMore || paged.isLoadingMore}
+                        >
+                            {paged.isLoadingMore
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <PlusCircle className="h-3.5 w-3.5" />}
+                            {paged.hasMore ? 'Cargar 50 más' : 'Historial completo'}
+                        </Button>
+                    </div>
+                )}
                 </Card>
             </main>
         </>
@@ -343,15 +479,16 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
     const [concept, setConcept] = useState("");
     const [totalAmount, setTotalAmount] = useState("");
     const [selectedItems, setSelectedItems] = useState<FiadoItem[]>([]);
+    const [isPromo, setIsPromo] = useState(false);
 
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null, 
+        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'products'), limit(50)) : null, 
         [firestore, user?.uid]
     );
     const { data: products } = useCollection<Product>(productsCollection);
 
     const repairJobsCollection = useMemoFirebase(() => 
-        (firestore && user) ? collection(firestore, 'users', user.uid, 'repair_jobs') : null, 
+        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'repair_jobs'), orderBy('createdAt', 'desc'), limit(100)) : null, 
         [firestore, user?.uid]
     );
     const { data: repairJobs } = useCollection<RepairJob>(repairJobsCollection);
@@ -392,7 +529,14 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
             if (existing) {
                 return prev.map(i => i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i);
             }
-            return [...prev, { productId: p.id!, productName: p.name, quantity: 1, price, costPrice: p.costPrice }];
+            return [...prev, { 
+                productId: p.id!, 
+                productName: p.name, 
+                quantity: 1, 
+                price, 
+                costPrice: p.costPrice,
+                isPromo: !!(p.promoPrice && p.promoPrice > 0)
+            }];
         });
         setSearchOpen(false);
     };
@@ -442,7 +586,8 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
                     totalCost: totalCost,
                     status: 'Pendiente',
                     createdAt: new Date().toISOString(),
-                    items: selectedItems
+                    items: selectedItems,
+                    isPromo: isPromo || selectedItems.some(i => i.isPromo)
                 });
                 transaction.set(newDoc, finalData);
                 Object.assign(dataToSave, finalData);
@@ -450,7 +595,7 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
 
             toast({ title: "Fiado registrado" });
             onAdded(dataToSave as Fiado);
-            setCustomerID(""); setCustomerName(""); setCustomerPhone(""); setConcept(""); setTotalAmount(""); setSelectedItems([]);
+            setCustomerID(""); setCustomerName(""); setCustomerPhone(""); setConcept(""); setTotalAmount(""); setSelectedItems([]); setIsPromo(false);
         } catch (e: any) {
             toast({ title: "Error", description: e.message, variant: "destructive" });
         } finally {
@@ -532,6 +677,23 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
                         </div>
                     )}
 
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/40 border">
+                        <div className="space-y-0.5">
+                            <Label className="text-xs font-bold">Promoción Especial</Label>
+                            <p className="text-[10px] text-muted-foreground">Marcar si esta deuda aplica condiciones o precio de promoción</p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant={isPromo ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setIsPromo(!isPromo)}
+                            className="h-8 gap-1.5 text-xs font-bold"
+                        >
+                            <TicketPercent className="w-3.5 h-3.5" />
+                            {isPromo ? "Promo Aplicada" : "Marcar Promo"}
+                        </Button>
+                    </div>
+
                     <div className="space-y-2">
                         <Label>Concepto (Descripción final)</Label>
                         <Input value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="Ej: Pantalla Samsung A51" required />
@@ -567,8 +729,8 @@ function AddItemsToFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: 
     const [selectedItems, setSelectedItems] = useState<FiadoItem[]>([]);
 
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null, 
-        [firestore, user?.uid]
+        (firestore && user && open) ? query(collection(firestore, 'users', user.uid, 'products'), limit(50)) : null, 
+        [firestore, user?.uid, open]
     );
     const { data: products } = useCollection<Product>(productsCollection);
 

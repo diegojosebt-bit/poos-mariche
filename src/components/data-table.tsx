@@ -29,6 +29,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "./ui/skeleton"
 
+import { Loader2 } from "lucide-react"
+
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[],
@@ -37,6 +39,9 @@ interface DataTableProps<TData, TValue> {
   children?: (table: Table<TData>) => React.ReactNode,
   globalFilterFn?: FilterFn<TData>,
   meta?: any;
+  onGlobalFilterChange?: (filterValue: string, filteredCount: number) => void;
+  isServerSearching?: boolean;
+  searchAddon?: React.ReactNode;
 }
 
 export function DataTable<TData, TValue>({
@@ -46,7 +51,10 @@ export function DataTable<TData, TValue>({
   isLoading = false,
   children,
   globalFilterFn,
-  meta
+  meta,
+  onGlobalFilterChange,
+  isServerSearching = false,
+  searchAddon
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -82,18 +90,33 @@ export function DataTable<TData, TValue>({
 
   const columnCount = table.getAllColumns().length;
   const tableRows = table.getRowModel().rows;
+  const filteredRowsCount = table.getFilteredRowModel().rows.length;
+
+  React.useEffect(() => {
+    onGlobalFilterChange?.(globalFilter, filteredRowsCount);
+  }, [globalFilter, filteredRowsCount, onGlobalFilterChange]);
 
   return (
     <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <Input
-                placeholder={filterPlaceholder}
-                value={globalFilter ?? ""}
-                onChange={(event) =>
-                    setGlobalFilter(event.target.value)
-                }
-                className="max-w-sm"
-            />
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+            <div className="flex items-center gap-2 max-w-sm w-full">
+              <div className="relative flex-1">
+                <Input
+                    placeholder={filterPlaceholder}
+                    value={globalFilter ?? ""}
+                    onChange={(event) =>
+                        setGlobalFilter(event.target.value)
+                    }
+                    className="pr-8"
+                />
+                {isServerSearching && (
+                  <div className="absolute right-2.5 top-2.5 text-primary">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                )}
+              </div>
+              {searchAddon}
+            </div>
              {children && children(table)}
         </div>
         <div className="rounded-md border bg-white">
@@ -143,7 +166,14 @@ export function DataTable<TData, TValue>({
             ) : (
                 <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground italic">
-                    No se encontraron resultados para esta búsqueda.
+                    {isServerSearching ? (
+                      <div className="flex items-center justify-center gap-2 text-primary font-bold">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Buscando en el servidor...</span>
+                      </div>
+                    ) : (
+                      "No se encontraron resultados para esta búsqueda."
+                    )}
                 </TableCell>
                 </TableRow>
             )}

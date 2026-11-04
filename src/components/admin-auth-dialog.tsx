@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -15,53 +15,175 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useDashboardStore } from "@/contexts/dashboard-context";
-import { Lock, Loader2 } from "lucide-react";
+import { Lock, ShieldAlert, Eye, EyeOff, AlertTriangle } from "lucide-react";
 
-const FALLBACK_PIN = "2026";
+import { useRouter } from "next/navigation";
+
+export type AdminActionType = 
+  | 'deleteSales'
+  | 'deleteRepairs'
+  | 'deleteProducts'
+  | 'deleteFiados'
+  | 'deleteExpenses'
+  | 'editProducts'
+  | 'general';
 
 type AdminAuthDialogProps = {
   children: ReactNode;
   onAuthorized: () => void;
+  actionType?: AdminActionType;
+  title?: string;
+  description?: string;
 };
 
-export function AdminAuthDialog({ children, onAuthorized }: AdminAuthDialogProps) {
+const ACTION_DESCRIPTIONS: Record<AdminActionType, { title: string; desc: string }> = {
+  deleteSales: {
+    title: "Anulación / Reembolso de Venta",
+    desc: "Ingresa el PIN de Administrador para autorizar el reembolso y ajuste de caja/stock."
+  },
+  deleteRepairs: {
+    title: "Eliminación de Reparación",
+    desc: "Ingresa el PIN de Administrador para eliminar permanentemente esta orden de servicio."
+  },
+  deleteProducts: {
+    title: "Eliminación de Producto",
+    desc: "Ingresa el PIN de Administrador para retirar este producto del catálogo e inventario."
+  },
+  deleteFiados: {
+    title: "Eliminación de Cuenta Fiada",
+    desc: "Ingresa el PIN de Administrador para cancelar o eliminar la deuda de este cliente."
+  },
+  deleteExpenses: {
+    title: "Eliminación de Gasto",
+    desc: "Ingresa el PIN de Administrador para anular este egreso de caja."
+  },
+  editProducts: {
+    title: "Edición de Producto",
+    desc: "Ingresa el PIN de Administrador para modificar precios y stock del inventario."
+  },
+  general: {
+    title: "Validación de Administrador",
+    desc: "Ingresa el PIN de Administrador para autorizar esta acción sensible."
+  }
+};
+
+export function AdminAuthDialog({ children, onAuthorized, actionType = 'general', title, description }: AdminAuthDialogProps) {
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const { toast } = useToast();
   
-  // BLINDAJE DE COSTOS: Consumimos el perfil del Store Global (0 lecturas)
+  // Consumimos el perfil del Store Global
   const { profile } = useDashboardStore();
 
-  // REGLA DE ORO: Si la seguridad está apagada, saltamos el PIN directamente.
-  if (profile && (profile.isPinRequired !== true || !profile.securityPin)) {
-      return (
-          <div 
-            onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onAuthorized();
-            }}
-            className="contents cursor-pointer"
-          >
-              {children}
-          </div>
-      );
+  // Comprobación de seguridad: ¿Esta acción requiere PIN?
+  const isProtected = () => {
+    if (!profile) return false;
+    // Si la seguridad global por PIN está activa
+    if (profile.isPinRequired === true) return true;
+    // Si el bloqueo específico de datos está activo
+    if (profile.isDataDeletionLocked === true) {
+      if (actionType === 'general') return true;
+      if (profile.protectedDataActions) {
+        const isGranularProtected = (profile.protectedDataActions as any)[actionType];
+        return isGranularProtected !== false;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  // Manejo de temporizador de bloqueo anti-fuerza bruta
+  useEffect(() => {
+    if (!lockoutUntil) {
+      setRemainingSeconds(0);
+      return;
+    }
+
+    const updateTimer = () => {
+      const diff = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      if (diff <= 0) {
+        setLockoutUntil(null);
+        setRemainingSeconds(0);
+        setFailedAttempts(0);
+      } else {
+        setRemainingSeconds(diff);
+      }
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutUntil]);
+
+  // Si no está protegido, pasa directamente sin modal
+  if (!isProtected()) {
+    return (
+      <div 
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onAuthorized();
+        }}
+        className="contents cursor-pointer"
+      >
+        {children}
+      </div>
+    );
   }
 
-  const handleAuth = () => {
-    const requiredPin = profile?.securityPin || FALLBACK_PIN;
+  const isLockedOut = remainingSeconds > 0;
+  const currentInfo = ACTION_DESCRIPTIONS[actionType] || ACTION_DESCRIPTIONS.general;
 
-    if (password === requiredPin) {
-      setOpen(false);
-      onAuthorized();
-    } else {
+  const handleAuth = () => {
+    if (isLockedOut) {
       toast({
         variant: "destructive",
-        title: "PIN Incorrecto",
-        description: "Operación no autorizada.",
+        title: "Sistema Bloqueado Temporalmente",
+        description: `Espera ${remainingSeconds} segundos antes de volver a intentar.`
       });
+      return;
     }
-    setPassword("");
+
+    if (!profile?.securityPin) {
+      toast({
+        variant: "destructive",
+        title: "PIN No Configurado",
+        description: "Aún no has configurado tu PIN de Administrador. Ve a Configuración para definirlo.",
+      });
+      return;
+    }
+
+    if (password === profile.securityPin) {
+      setOpen(false);
+      setPassword("");
+      setFailedAttempts(0);
+      onAuthorized();
+    } else {
+      const nextFailed = failedAttempts + 1;
+      setFailedAttempts(nextFailed);
+      setPassword("");
+
+      if (nextFailed >= 3) {
+        const lockoutTime = Date.now() + 30000; // 30 segundos de penalización
+        setLockoutUntil(lockoutTime);
+        setRemainingSeconds(30);
+        toast({
+          variant: "destructive",
+          title: "¡Alerta de Seguridad: Bloqueo de 30s!",
+          description: "Demasiados intentos erróneos. El diálogo ha sido bloqueado por 30 segundos.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "PIN Incorrecto",
+          description: `Te quedan ${3 - nextFailed} intento(s) antes del bloqueo temporal.`,
+        });
+      }
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -70,38 +192,115 @@ export function AdminAuthDialog({ children, onAuthorized }: AdminAuthDialogProps
       e.stopPropagation();
       handleAuth();
     }
-  }
+  };
+
+  const router = useRouter();
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => {
+      if (!isLockedOut) {
+        setOpen(v);
+        if (!v) setPassword("");
+      }
+    }}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md border-destructive/20 shadow-2xl">
         <DialogHeader>
-          <DialogTitle className="uppercase font-black text-primary flex items-center gap-2">
-            <Lock className="w-5 h-5" /> Validación de Gerente
+          <DialogTitle className="uppercase font-black text-destructive flex items-center gap-2 text-base">
+            <ShieldAlert className="w-5 h-5 text-destructive shrink-0" />
+            {title || currentInfo.title}
           </DialogTitle>
-          <DialogDescription className="font-bold">
-            Confirma tu PIN para realizar esta acción.
+          <DialogDescription className="font-medium text-xs text-muted-foreground pt-1">
+            {description || currentInfo.desc}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="admin-password" className="text-[10px] font-black uppercase text-muted-foreground">PIN de Seguridad</Label>
-            <Input
-              id="admin-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="text-center text-2xl font-black h-12"
-              placeholder="••••"
-              autoFocus
-            />
-          </div>
+
+        <div className="space-y-4 py-3">
+          {isLockedOut ? (
+            <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 shrink-0 animate-bounce" />
+              <div>
+                <p className="font-bold text-xs uppercase">Bloqueo de Seguridad Activo</p>
+                <p className="text-xs">
+                  Reintenta en <strong className="font-black text-sm">{remainingSeconds}s</strong>
+                </p>
+              </div>
+            </div>
+          ) : !profile?.securityPin ? (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs space-y-2">
+              <p className="font-bold">⚠️ PIN de Administrador no configurado</p>
+              <p className="text-[11px] text-amber-800">
+                Aún no has configurado tu PIN de seguridad. Ve a <strong>Configuración &gt; Bloqueo de Datos</strong> para crear tu clave de Administrador antes de autorizar eliminaciones.
+              </p>
+              <Button 
+                type="button" 
+                size="sm" 
+                variant="outline" 
+                className="h-8 text-xs border-amber-300 text-amber-900 font-bold"
+                onClick={() => { setOpen(false); router.push('/dashboard/settings'); }}
+              >
+                Ir a Configuración
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <Label htmlFor="admin-security-pin" className="text-[10px] font-black uppercase text-muted-foreground flex items-center gap-1.5">
+                  <Lock className="w-3 h-3" /> PIN de Administrador
+                </Label>
+                {failedAttempts > 0 && (
+                  <span className="text-[10px] font-bold text-destructive">
+                    Intentos: {failedAttempts} / 3
+                  </span>
+                )}
+              </div>
+              <div className="relative">
+                <Input
+                  id="admin-security-pin"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  className="text-center text-2xl font-black h-12 tracking-widest pr-10"
+                  placeholder="••••"
+                  autoFocus
+                  disabled={isLockedOut}
+                  maxLength={8}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground text-center">
+                Acción protegida contra borrado accidental o no autorizado.
+              </p>
+            </div>
+          )}
         </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-          <Button type="submit" onClick={handleAuth} className="font-bold">Autorizar</Button>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button 
+            type="button" 
+            variant="outline" 
+            onClick={() => setOpen(false)}
+            disabled={isLockedOut}
+          >
+            Cancelar
+          </Button>
+          <Button 
+            type="submit" 
+            onClick={handleAuth} 
+            disabled={isLockedOut || !profile?.securityPin || !password.trim()}
+            className="font-bold bg-destructive hover:bg-destructive/90 text-white shadow-md"
+          >
+            Autorizar Eliminación
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,15 +1,20 @@
 "use client";
 
-import React, { Suspense, useState, useMemo, useEffect } from 'react';
+import React, { Suspense, useState, useMemo, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
-import { PlusCircle, Trash2, Calculator, Clock } from "lucide-react";
+import { PlusCircle, Trash2, Calculator, Clock, RefreshCw, Loader2 } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 import { columns } from "@/components/inventory/columns";
-import type { Product, UserProfile } from '@/lib/types';
+import type { Product } from '@/lib/types';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCollection, useFirebase, useMemoFirebase, useDoc } from '@/firebase';
-import { collection, writeBatch, doc, query, limit, orderBy } from 'firebase/firestore';
+import { useCollection, useFirebase, useMemoFirebase } from '@/firebase';
+import { useDashboardStore } from '@/contexts/dashboard-context';
+import { usePagedQuery } from '@/lib/firestore/use-paged-query';
+import { useServerSearch } from '@/lib/firestore/use-server-search';
+import { queryCache, type WithId } from '@/lib/firestore/query-cache';
+import { useFeatureFlag } from '@/lib/features';
+import { collection, writeBatch, doc } from 'firebase/firestore';
 import type { Table as TanstackTable, FilterFn } from '@tanstack/react-table';
 import {
   AlertDialog,
@@ -27,19 +32,24 @@ import { PrintLabelsButton } from '@/components/inventory/print-labels-button';
 import { PriceCalculatorDialog } from '@/components/tools/price-calculator-dialog';
 import { ProductFormDialog } from '@/components/inventory/product-form-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { differenceInDays, parseISO } from 'date-fns';
 import { cn } from "@/lib/utils";
 import { SecurityGate } from "@/components/security-gate";
+import { normalizeText } from '@/lib/search-index';
 
 const productFilterFn: FilterFn<Product> = (row, columnId, value) => {
-    const term = String(value).toLowerCase();
+    const term = normalizeText(String(value));
     const p = row.original;
-    const name = (p.name || "").toLowerCase();
-    const sku = (p.sku || "").toLowerCase();
-    const cat = (p.category || "").toLowerCase();
-    const models = (p.compatibleModels || []).join(" ").toLowerCase();
-    
-    return name.includes(term) || sku.includes(term) || cat.includes(term) || models.includes(term);
+    const name = normalizeText(p.name);
+    const sku = normalizeText(p.sku);
+    const cat = normalizeText(p.category);
+    const models = normalizeText((p.compatibleModels || []).join(' '));
+    const barcode = normalizeText(p.barcode);
+    const keywords = normalizeText((p.searchKeywords || []).join(' '));
+
+    return name.includes(term) || sku.includes(term) || cat.includes(term) ||
+        models.includes(term) || barcode.includes(term) || keywords.includes(term);
 };
 
 function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
@@ -107,19 +117,40 @@ function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
 function InventoryContent() {
     const { firestore, user } = useFirebase();
     
-    const profileRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile } = useDoc<UserProfile>(profileRef);
-    
-    // ESTANDARIZADO: Límite 200 para compartir cache con el POS
-    const productsCollection = useMemoFirebase(() =>
-        (firestore && user) ? query(collection(firestore, 'users', user.uid, 'products'), orderBy('name'), limit(200)) : null,
-        [firestore, user?.uid]
-    );
-    const { data: products, isLoading, mutate: mutateProducts } = useCollection<Product>(productsCollection);
+    const { profile } = useDashboardStore();
+    const uid = user?.uid ?? '';
+    const usePaged = useFeatureFlag(profile, 'pagedData');
 
+    // LEGACY (bandera apagada): catálogo completo, como hasta ahora.
+    const productsCollection = useMemoFirebase(() =>
+        (firestore && user) ? collection(firestore, 'users', user.uid, 'products') : null,
+        [firestore, user?.uid]
+    );
+    const legacy = useCollection<Product>(usePaged ? null : productsCollection);
+
+    // FASE 2 (bandera encendida): 100 productos + "Cargar más" + caché con TTL.
+    const paged = usePagedQuery<Product>({
+        collectionName: 'products',
+        orderField: 'name',
+        orderDir: 'asc',
+        pageSize: 100,
+        enabled: usePaged,
+    });
+
+    // Los soft-deleted se filtran en cliente hasta que el backfill permita
+    // filtrarlos en el servidor (`isDeleted == false`).
+    const pagedProducts = useMemo(
+        () => paged.items.filter((product) => !product.isDeleted),
+        [paged.items],
+    );
+
+    const products = usePaged ? pagedProducts : legacy.data;
+    const isLoading = usePaged ? paged.isLoading : legacy.isLoading;
+    const refetchProducts = usePaged ? paged.reload : legacy.refetch;
+
+    const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
     const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out' | 'old'>('all');
     const [categoryFilter, setCategoryFilter] = useState('all');
 
@@ -163,6 +194,52 @@ function InventoryContent() {
         return temp;
     }, [products, stockFilter, categoryFilter, showAging]);
 
+    /** Sustituye al `mutate` del hook legacy cuando la bandera está activa. */
+    const mutateProducts = useCallback((updater: WithId<Product>[] | ((prev: WithId<Product>[] | null) => WithId<Product>[] | null)) => {
+        if (!usePaged || !uid) {
+            legacy.mutate(updater);
+            return;
+        }
+
+        const current = paged.items;
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        if (!Array.isArray(next)) return;
+
+        const currentById = new Map(current.map((item) => [item.id, item]));
+        const nextIds = new Set(next.map((item) => item.id));
+
+        next.forEach((item) => {
+            if (!item?.id) return;
+            const previous = currentById.get(item.id);
+            if (!previous) {
+                queryCache.mergeIntoCatalog(uid, 'products', [item]);
+            } else if (previous !== item) {
+                queryCache.patchItem(uid, 'products', item.id, item);
+            }
+        });
+
+        current.forEach((item) => {
+            if (item.id && !nextIds.has(item.id)) {
+                queryCache.removeItem(uid, 'products', item.id);
+            }
+        });
+    }, [usePaged, uid, paged.items, legacy.mutate]);
+
+    // Búsqueda en servidor (Fase 2). Los resultados se fusionan al catálogo
+    // cacheado, así que aparecen en la tabla sin cambiar el flujo de datos.
+    const [searchTerm, setSearchTerm] = useState('');
+    const serverSearchFlag = useFeatureFlag(profile, 'serverSearch');
+    const serverSearch = useServerSearch<Product>({
+        collectionName: 'products',
+        term: searchTerm,
+        orderField: 'name',
+        orderDir: 'asc',
+        pageSize: 20,
+        enabled: usePaged && serverSearchFlag,
+        onResults: (found) => queryCache.mergeIntoCatalog(uid, 'products', found),
+    });
+    const handleSearchChange = useCallback((value: string) => setSearchTerm(value), []);
+
     const handleOptimisticUpdate = (newProduct: Product) => {
         mutateProducts((prev) => {
             if (!prev) return [newProduct as any];
@@ -199,21 +276,96 @@ function InventoryContent() {
                     columns={tableColumns} 
                     data={filteredProducts}
                     isLoading={isLoading}
-                    filterPlaceholder="Buscar productos..."
-                    meta={{ allProducts: products || [], showAging, showRepairs, mutate: mutateProducts }}
+                    filterPlaceholder="Buscar productos en inventario..."
+                    meta={{ 
+                        allProducts: products || [], 
+                        showAging, 
+                        showRepairs, 
+                        mutate: mutateProducts,
+                        onEditProduct: (p: Product) => {
+                            setEditingProduct(p);
+                            setIsEditDialogOpen(true);
+                        }
+                    }}
                     globalFilterFn={productFilterFn}
+                    onGlobalFilterChange={handleSearchChange}
+                    isServerSearching={usePaged && serverSearchFlag && serverSearch.isSearching}
                 >
                     {(table) => (
                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                                <SelectTrigger className="w-full sm:w-[160px] h-9 text-xs"><SelectValue placeholder="Categoría" /></SelectTrigger>
-                                <SelectContent>{categories.map(c => <SelectItem key={c} value={c} className="text-xs">{c === 'all' ? 'Todas' : c}</SelectItem>)}</SelectContent>
+                                 <SelectTrigger className="w-full sm:w-[160px] h-9 text-xs"><SelectValue placeholder="Categoría" /></SelectTrigger>
+                                 <SelectContent>{categories.map(c => <SelectItem key={c} value={c} className="text-xs">{c === 'all' ? 'Todas' : c}</SelectItem>)}</SelectContent>
                             </Select>
                             <PrintLabelsButton table={table} />
                             <BulkDeleteButton table={table} />
                         </div>
                     )}
                 </DataTable>
+
+                <div className="mt-4 p-3 bg-muted/30 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <span className="text-muted-foreground font-medium">
+                            {usePaged ? (
+                                <>Productos cargados: <strong className="text-foreground">{products?.length || 0}</strong> ({filteredProducts.length} visibles)</>
+                            ) : (
+                                <>Total en inventario: <strong className="text-foreground">{products?.length || 0}</strong> productos ({filteredProducts.length} visibles)</>
+                            )}
+                        </span>
+                    </div>
+                    {usePaged && (
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => paged.loadMore()}
+                            disabled={paged.isLoadingMore || !paged.hasMore}
+                            className="h-8 text-xs font-semibold gap-1.5"
+                        >
+                            {paged.isLoadingMore
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <PlusCircle className="w-3.5 h-3.5" />}
+                            {paged.hasMore ? 'Cargar 100 más' : 'Catálogo completo'}
+                        </Button>
+                    )}
+                    <AlertDialog open={isSyncConfirmOpen} onOpenChange={setIsSyncConfirmOpen}>
+                        <AlertDialogTrigger asChild>
+                            <Button 
+                                variant="outline" 
+                                size="sm" 
+                                disabled={isLoading}
+                                className="h-8 text-xs font-semibold gap-1.5"
+                            >
+                                <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
+                                Sincronizar catálogo
+                            </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>¿Sincronizar el catálogo?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Se volverán a descargar todos los productos desde Firebase y cada descarga consume lecturas.
+                                    Úsalo solo si sospechas que otro dispositivo cambió el inventario.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => refetchProducts()}>Sincronizar</AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                </div>
+
+                {editingProduct && (
+                    <ProductFormDialog 
+                        product={editingProduct} 
+                        isOpen={isEditDialogOpen} 
+                        onOpenChange={(open) => {
+                            setIsEditDialogOpen(open);
+                            if (!open) setEditingProduct(null);
+                        }}
+                        onSaved={handleOptimisticUpdate}
+                    />
+                )}
             </main>
         </>
     );

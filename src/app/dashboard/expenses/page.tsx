@@ -2,7 +2,14 @@
 
 import { PageHeader } from "@/components/page-header";
 import { useCollection, useFirebase, useMemoFirebase, setDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase";
-import { collection, doc, query, orderBy } from "firebase/firestore";
+import { collection, doc, query, orderBy, setDoc } from "firebase/firestore";
+import { dailyRef, expenseStatsWrites, monthlyRef } from '@/lib/firestore/rollups';
+import { usePagedQuery } from '@/lib/firestore/use-paged-query';
+import { queryCache, type WithId } from '@/lib/firestore/query-cache';
+import type { QueryFilter } from '@/lib/firestore/cache-policy';
+import { useDailyStatsRange } from '@/lib/firestore/stats-range';
+import { useFeatureFlag } from '@/lib/features';
+import { useDashboardStore } from '@/contexts/dashboard-context';
 import type { Expense, PaymentMethod, ExpenseCategory } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,8 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useMemo } from "react";
-import { PlusCircle, Trash2, Receipt, Search, Calendar as CalendarIcon, X as ClearIcon, ArrowDownCircle, DollarSign, Landmark } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { PlusCircle, Trash2, Receipt, Search, Calendar as CalendarIcon, X as ClearIcon, ArrowDownCircle, DollarSign, Landmark, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { format, parseISO, isWithinInterval, startOfDay, endOfDay, isValid } from "date-fns";
 import { es } from "date-fns/locale";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -40,6 +47,9 @@ function ExpensesContent() {
     const { firestore, user } = useFirebase();
     const { toast } = useToast();
     const { format: formatCurrency, convert, bcvRate } = useCurrency();
+    const { profile } = useDashboardStore();
+    const uid = user?.uid ?? '';
+    const usePaged = useFeatureFlag(profile, 'pagedData');
     const [isAddOpen, setIsAddOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
@@ -47,12 +57,70 @@ function ExpensesContent() {
         from: startOfDay(new Date()),
         to: endOfDay(new Date()),
     });
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
 
+    const fromIso = dateRange?.from ? startOfDay(dateRange.from).toISOString() : undefined;
+    const toIso = dateRange?.to
+        ? endOfDay(dateRange.to).toISOString()
+        : dateRange?.from
+            ? endOfDay(dateRange.from).toISOString()
+            : undefined;
+
+    // LEGACY (bandera apagada): todos los gastos, como hasta ahora.
     const expensesCollection = useMemoFirebase(() => 
-        (firestore && user) ? query(collection(firestore, "users", user.uid, "expenses"), orderBy("createdAt", "desc")) : null,
-        [firestore, user?.uid]
+        (firestore && user && !usePaged) ? query(collection(firestore, "users", user.uid, "expenses"), orderBy("createdAt", "desc")) : null,
+        [firestore, user?.uid, usePaged]
     );
-    const { data: expenses, isLoading, mutate: mutateExpenses } = useCollection<Expense>(expensesCollection);
+    const legacy = useCollection<Expense>(expensesCollection);
+
+    // FASE 2: solo el rango seleccionado, 50 por página.
+    const rangeFilters: QueryFilter[] = fromIso && toIso
+        ? [['createdAt', '>=', fromIso], ['createdAt', '<=', toIso]]
+        : [];
+
+    const paged = usePagedQuery<Expense>({
+        collectionName: 'expenses',
+        filters: rangeFilters,
+        orderField: 'createdAt',
+        orderDir: 'desc',
+        pageSize: 50,
+        enabled: usePaged,
+    });
+
+    const expenses = usePaged ? paged.items : legacy.data;
+    const isLoading = usePaged ? paged.isLoading : legacy.isLoading;
+
+    /** Sustituye al `mutate` del hook legacy cuando la bandera está activa. */
+    const mutateExpenses = useCallback((updater: WithId<Expense>[] | ((prev: WithId<Expense>[] | null) => WithId<Expense>[] | null)) => {
+        if (!usePaged || !uid) {
+            legacy.mutate(updater);
+            return;
+        }
+
+        const current = paged.items;
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        if (!Array.isArray(next)) return;
+
+        const currentById = new Map(current.map((item) => [item.id, item]));
+        const nextIds = new Set(next.map((item) => item.id));
+
+        next.forEach((item) => {
+            if (!item?.id) return;
+            const previous = currentById.get(item.id);
+            if (!previous) {
+                queryCache.mergeIntoCatalog(uid, 'expenses', [item]);
+            } else if (previous !== item) {
+                queryCache.patchItem(uid, 'expenses', item.id, item);
+            }
+        });
+
+        current.forEach((item) => {
+            if (item.id && !nextIds.has(item.id)) {
+                queryCache.removeItem(uid, 'expenses', item.id);
+            }
+        });
+    }, [usePaged, uid, paged.items, legacy.mutate]);
 
     const filteredExpenses = useMemo(() => {
         if (!expenses) return [];
@@ -72,7 +140,29 @@ function ExpensesContent() {
         });
     }, [expenses, searchTerm, categoryFilter, dateRange]);
 
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, categoryFilter, dateRange]);
+
+    const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE));
+
+    const paginatedExpenses = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filteredExpenses.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [filteredExpenses, currentPage, ITEMS_PER_PAGE]);
+
+    const { stats: rangeStats, hasData: hasRangeStats } = useDailyStatsRange(
+        usePaged ? dateRange?.from : undefined,
+        usePaged ? (dateRange?.to || dateRange?.from) : undefined,
+    );
+
     const stats = useMemo(() => {
+        if (usePaged && hasRangeStats && rangeStats) {
+            const usd = rangeStats.expensesUSD;
+            const bs = rangeStats.expensesBs;
+            return { usd, bs, totalUSD: usd + convert(bs, 'Bs', 'USD') };
+        }
+
         let usd = 0;
         let bs = 0;
         filteredExpenses.forEach(ex => {
@@ -80,20 +170,41 @@ function ExpensesContent() {
             bs += ex.amountBs || 0;
         });
         return { usd, bs, totalUSD: usd + convert(bs, 'Bs', 'USD') };
-    }, [filteredExpenses, convert]);
+    }, [usePaged, hasRangeStats, rangeStats, filteredExpenses, convert]);
+
+    /** Fase 1: agrega/revierte un gasto sin lecturas (best-effort). */
+    const applyExpenseStats = (expense: Expense, sign: 1 | -1) => {
+        if (!firestore || !user) return;
+
+        try {
+            const stats = expenseStatsWrites(expense, sign);
+            void setDoc(dailyRef(firestore, user.uid, stats.day), stats.daily, { merge: true }).catch(() => {});
+            void setDoc(monthlyRef(firestore, user.uid, stats.day.slice(0, 7)), stats.monthly, { merge: true }).catch(() => {});
+        } catch (error) {
+            console.warn('[gastos] No se pudieron preparar los agregados:', error);
+        }
+    };
 
     const handleDelete = (id: string) => {
         if (!firestore || !user || !id) return;
-        
+
+        const expense = expenses?.find(ex => ex.id === id);
+
         // Optimistic delete
         mutateExpenses((prev) => prev?.filter(ex => ex.id !== id) || null);
         
         deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'expenses', id));
+
+        // Fase 1: revertir el agregado del gasto (0 lecturas, best-effort).
+        if (expense) applyExpenseStats(expense, -1);
+
         toast({ title: "Gasto eliminado", variant: "destructive" });
     };
 
     const handleExpenseAdded = (newExpense: Expense) => {
         mutateExpenses((prev) => [newExpense as any, ...(prev || [])]);
+        // Fase 1: agregar el gasto a los agregados diarios/mensuales.
+        applyExpenseStats(newExpense, 1);
         setIsAddOpen(false);
     };
 
@@ -161,7 +272,7 @@ function ExpensesContent() {
                     <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b bg-slate-50/50">
                         <div>
                             <CardTitle className="text-lg font-black uppercase flex items-center gap-2">
-                                <Receipt className="w-5 h-5 text-primary"/> Bitácora de Gastos
+                                <Receipt className="w-5 h-5 text-primary"/> Transacciones de Gastos
                             </CardTitle>
                             <CardDescription className="text-[10px] font-bold uppercase">Control de egresos administrativos y operativos.</CardDescription>
                         </div>
@@ -201,9 +312,9 @@ function ExpensesContent() {
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow><TableCell colSpan={6} className="text-center py-10">Cargando...</TableCell></TableRow>
-                                ) : filteredExpenses.length === 0 ? (
+                                ) : paginatedExpenses.length === 0 ? (
                                     <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic uppercase font-bold text-xs opacity-50">No hay gastos en este periodo.</TableCell></TableRow>
-                                ) : filteredExpenses.map((ex) => {
+                                ) : paginatedExpenses.map((ex) => {
                                     const date = parseISO(ex.createdAt);
                                     return (
                                         <TableRow key={ex.id} className="hover:bg-muted/10">
@@ -226,7 +337,7 @@ function ExpensesContent() {
                                                 <span className="text-[10px] font-bold uppercase text-slate-600">{ex.amountUSD > 0 ? ex.methodUSD : ex.methodBs}</span>
                                             </TableCell>
                                             <TableCell className="text-right">
-                                                <AdminAuthDialog onAuthorized={() => handleDelete(ex.id!)}>
+                                                <AdminAuthDialog actionType="deleteExpenses" onAuthorized={() => handleDelete(ex.id!)}>
                                                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10">
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
@@ -238,6 +349,55 @@ function ExpensesContent() {
                             </TableBody>
                         </Table>
                     </CardContent>
+                    {filteredExpenses.length > 0 && (
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t bg-slate-50/50 text-xs text-muted-foreground">
+                            <div>
+                                Mostrando <span className="font-bold text-slate-800">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> a <span className="font-bold text-slate-800">{Math.min(currentPage * ITEMS_PER_PAGE, filteredExpenses.length)}</span> de <span className="font-bold text-slate-800">{filteredExpenses.length}</span> transacciones
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs font-bold"
+                                    disabled={currentPage === 1}
+                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                >
+                                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+                                </Button>
+                                <span className="font-bold text-slate-800 px-2">
+                                    Página {currentPage} de {totalPages}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs font-bold"
+                                    disabled={currentPage >= totalPages}
+                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                >
+                                    Siguiente <ChevronRight className="h-4 w-4 ml-1" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                    {usePaged && (
+                        <div className="flex items-center justify-center gap-3 p-4 border-t bg-slate-50/50">
+                            <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                                {expenses?.length || 0} gastos cargados
+                            </span>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="h-8 px-2 text-xs font-bold gap-1.5"
+                                onClick={() => { void paged.loadMore(); }}
+                                disabled={!paged.hasMore || paged.isLoadingMore}
+                            >
+                                {paged.isLoadingMore
+                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    : <PlusCircle className="h-3.5 w-3.5" />}
+                                {paged.hasMore ? 'Cargar 50 más' : 'Rango completo'}
+                            </Button>
+                        </div>
+                    )}
                 </Card>
             </main>
         </>

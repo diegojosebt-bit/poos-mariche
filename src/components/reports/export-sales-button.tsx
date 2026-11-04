@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { format, isWithinInterval, startOfDay, endOfDay } from "date-fns";
+import { format, isWithinInterval, startOfDay, endOfDay, subDays, differenceInCalendarDays } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,9 @@ import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/use-currency";
+import { useFirebase } from "@/firebase";
+import { collection, getCountFromServer, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
+import { countServerReads } from "@/lib/firestore/read-meter";
 
 type ExportSalesButtonProps = {
   sales: Sale[];
@@ -24,46 +27,110 @@ type ExportSalesButtonProps = {
   fiados: Fiado[];
 };
 
-export function ExportSalesButton({ sales, products, repairJobs, fiados }: ExportSalesButtonProps) {
+const MAX_DAYS = 31;
+const MAX_DOCS = 2000;
+const PAGE_SIZE = 200;
+
+export function ExportSalesButton({ products, repairJobs, fiados }: ExportSalesButtonProps) {
   const [date, setDate] = useState<DateRange | undefined>({
-    from: new Date(),
+    from: subDays(new Date(), 6),
     to: new Date(),
   });
+  const [isExporting, setIsExporting] = useState(false);
   const { toast } = useToast();
+  const { firestore, user } = useFirebase();
   const { bcvRate: currentBcvRate, parallelRate: currentParallelRate } = useCurrency();
 
-  const handleExport = () => {
-    if (!date?.from || !sales || !repairJobs || !products) {
+  const handleExport = async () => {
+    if (!date?.from || !firestore || !user) {
       toast({
         variant: "destructive",
         title: "Error de Datos",
-        description: "Asegúrate de seleccionar fechas y que los datos hayan cargado.",
+        description: "Selecciona un rango de fechas válido.",
       });
       return;
     }
     
     const from = startOfDay(date.from);
     const to = date.to ? endOfDay(date.to) : endOfDay(date.from);
+    const days = differenceInCalendarDays(to, from) + 1;
 
-    const filteredSales = sales.filter((sale) => {
-      if (!sale.transactionDate || sale.status !== 'completed') return false;
-      const saleDate = new Date(sale.transactionDate);
-      return isWithinInterval(saleDate, { start: from, end: to });
-    });
+    if (days > MAX_DAYS) {
+      toast({
+        variant: "destructive",
+        title: "Rango demasiado amplio",
+        description: `El máximo es ${MAX_DAYS} días. Para períodos mayores usa Reportes por rango.`,
+      });
+      return;
+    }
 
-    if (filteredSales.length === 0) {
+    const baseQuery = query(
+      collection(firestore, 'users', user.uid, 'sale_transactions'),
+      where('transactionDate', '>=', from.toISOString()),
+      where('transactionDate', '<=', to.toISOString()),
+      orderBy('transactionDate', 'desc'),
+    );
+
+    setIsExporting(true);
+
+    try {
+      // Estimación barata: 1 lectura por cada 1.000 documentos.
+      const countSnap = await getCountFromServer(baseQuery);
+      countServerReads(Math.max(1, Math.ceil(countSnap.data().count / 1000)), 'export:count');
+      const estimated = countSnap.data().count;
+
+      if (estimated === 0) {
+        toast({ title: "No hay datos", description: "No hay ventas en el rango seleccionado." });
+        return;
+      }
+
+      if (estimated > MAX_DOCS) {
         toast({
-            title: "No hay datos",
-            description: "No se encontraron ventas completadas en el rango seleccionado."
+          variant: "destructive",
+          title: "Rango demasiado grande",
+          description: `Hay ~${estimated} ventas. Reduce el rango (máximo ${MAX_DOCS}).`,
         });
         return;
-    }
+      }
+
+      const confirmed = window.confirm(
+        `Se leerán ~${estimated} ventas del rango y se generará el Excel.\n\n¿Continuar?`,
+      );
+      if (!confirmed) return;
+
+      const allSales: Sale[] = [];
+      let last: any = null;
+
+      for (;;) {
+        const pageQuery = last
+          ? query(baseQuery, startAfter(last), limit(PAGE_SIZE))
+          : query(baseQuery, limit(PAGE_SIZE));
+
+        const snapshot = await getDocs(pageQuery);
+        countServerReads(snapshot.size, 'export:sales');
+        allSales.push(...snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as Sale));
+
+        if (snapshot.size < PAGE_SIZE) break;
+        last = snapshot.docs[snapshot.docs.length - 1];
+      }
+
+      const filteredSales = allSales.filter((sale) => sale.status === 'completed');
+
+      if (filteredSales.length === 0) {
+        toast({
+          title: "No hay datos",
+          description: "No se encontraron ventas completadas en el rango seleccionado.",
+        });
+        return;
+      }
     
     // Map para consolidar actividad de reparaciones en el periodo
     const repairsActivity = new Map<string, {
         revenue: number,
         realRevenue: number,
-        repairJob: RepairJob,
+        repairJob?: RepairJob | null,
+        repairItemName?: string,
+        cost?: number,
         lastDate: string,
         lastSaleId: string,
         paymentMethods: Set<string>,
@@ -80,26 +147,34 @@ export function ExportSalesButton({ sales, products, repairJobs, fiados }: Expor
         const saleBcvRate = sale.bcvRateAtTime || currentBcvRate;
         const saleParallelRate = sale.parallelRateAtTime || currentParallelRate;
         
-        // AJUSTE DE VALOR REAL (REPOSICIÓN)
-        const isSalePromo = sale.items.some(i => i.isPromo);
-        const rateFactor = isSalePromo ? 1 : (saleBcvRate / saleParallelRate);
-        
         // Calculamos el ratio de cobro
         const itemsTotalBillable = sale.items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
         const collectionRatio = itemsTotalBillable > 0 ? totalCollectedNominal / itemsTotalBillable : 1;
 
         const productItemsInSale = sale.items.filter(i => !i.isRepair);
+        const frozenCostSum = productItemsInSale.reduce((acc, i) => {
+            const c = i.costPrice ?? i.customCostPrice;
+            return acc + ((c && c > 0 ? c : 0) * i.quantity);
+        }, 0);
+        const remainingSaleCost = typeof sale.costPrice === 'number' && sale.costPrice > 0
+            ? Math.max(0, sale.costPrice - frozenCostSum)
+            : 0;
+        const itemsNeedingCost = productItemsInSale.filter(i => {
+            const c = i.costPrice ?? i.customCostPrice;
+            return !c || c <= 0;
+        });
+        const billableNeedingCost = itemsNeedingCost.reduce((acc, i) => acc + (i.price * i.quantity), 0);
         
         productItemsInSale.forEach(item => {
             const nominalRevenue = (item.price * item.quantity) * collectionRatio;
-            const realRevenue = nominalRevenue * rateFactor;
+            const realRevenue = nominalRevenue;
             
             let cost = 0;
 
             // --- MOTOR DE RESCATE HÍBRIDO EN EXCEL ---
-            if (item.costPrice !== undefined && item.costPrice !== null && item.costPrice !== 0) {
-                // Caso A: Costo congelado presente
-                cost = item.costPrice * item.quantity * collectionRatio;
+            if (item.costPrice !== undefined && item.costPrice !== null && item.costPrice > 0) {
+                // Caso A: Costo congelado presente (inmutable)
+                cost = item.costPrice * item.quantity;
             } else {
                 // Caso B: Rescate histórico desde Memoria RAM
                 if (sale.fiadoId) {
@@ -109,7 +184,7 @@ export function ExportSalesButton({ sales, products, repairJobs, fiados }: Expor
                         cost = nominalRevenue * costRatio;
                     }
                 } else if (item.isCustom) {
-                    cost = (item.customCostPrice || 0) * item.quantity * collectionRatio;
+                    cost = (item.customCostPrice || 0) * item.quantity;
                 } else {
                     // Lookup por ID, SKU o Nombre (Fuzzy rescue)
                     const matchedProduct = products.find(p => 
@@ -117,7 +192,18 @@ export function ExportSalesButton({ sales, products, repairJobs, fiados }: Expor
                         p.sku === item.productId || 
                         p.name === item.name
                     );
-                    cost = (matchedProduct?.costPrice || 0) * item.quantity * collectionRatio;
+                    cost = (matchedProduct?.costPrice || 0) * item.quantity;
+                }
+
+                // Rescate desde sale.costPrice si aún es 0 (0 lecturas)
+                if (cost === 0 && remainingSaleCost > 0) {
+                    if (itemsNeedingCost.length === 1) {
+                        cost = remainingSaleCost;
+                    } else if (billableNeedingCost > 0) {
+                        cost = ((item.price * item.quantity) / billableNeedingCost) * remainingSaleCost;
+                    } else {
+                        cost = remainingSaleCost / (itemsNeedingCost.length || 1);
+                    }
                 }
             }
             
@@ -145,40 +231,50 @@ export function ExportSalesButton({ sales, products, repairJobs, fiados }: Expor
         const repairItem = sale.items.find(i => i.isRepair);
         const rId = sale.repairJobId || repairItem?.productId;
         
-        if (rId) {
-            const repairRevenueInThisSaleNominal = (repairItem ? (repairItem.price * repairItem.quantity) : 0) * collectionRatio;
-            const repairRealRevenueInThisSale = repairRevenueInThisSaleNominal * rateFactor;
+        if (rId && repairItem) {
+            const repairRevenueInThisSaleNominal = (repairItem.price * repairItem.quantity) * collectionRatio;
+            // Igual que en las líneas de producto: el ingreso ya viene prorrateado
+            // por `collectionRatio`. Antes se multiplicaba por `rateFactor`, una
+            // variable inexistente que hacía fallar la exportación con reparaciones.
+            const repairRealRevenueInThisSale = repairRevenueInThisSaleNominal;
             
             if (repairRevenueInThisSaleNominal > 0) {
                 const repairJob = repairJobs.find(job => job.id === rId);
-                if (repairJob) {
-                    const existing = repairsActivity.get(rId);
-                    if (existing) {
-                        existing.revenue += repairRevenueInThisSaleNominal;
-                        existing.realRevenue += repairRealRevenueInThisSale;
-                        existing.paymentMethods.add(sale.paymentMethod);
-                        if (new Date(sale.transactionDate) > new Date(existing.lastDate)) {
-                            existing.lastDate = sale.transactionDate;
-                            existing.lastSaleId = sale.id!;
-                            existing.bcvRate = saleBcvRate;
-                            existing.parallelRate = saleParallelRate;
-                            existing.customerName = sale.customerName || repairJob.customerName;
-                            existing.customerID = sale.customerID || repairJob.customerID;
-                        }
-                    } else {
-                        repairsActivity.set(rId, {
-                            revenue: repairRevenueInThisSaleNominal,
-                            realRevenue: repairRealRevenueInThisSale,
-                            repairJob,
-                            lastDate: sale.transactionDate,
-                            lastSaleId: sale.id!,
-                            paymentMethods: new Set([sale.paymentMethod]),
-                            bcvRate: saleBcvRate,
-                            parallelRate: saleParallelRate,
-                            customerName: sale.customerName || repairJob.customerName,
-                            customerID: sale.customerID || repairJob.customerID
-                        });
+                const repairFrozenCost = (repairItem.costPrice && repairItem.costPrice > 0)
+                    ? (repairItem.costPrice * repairItem.quantity)
+                    : (productItemsInSale.length === 0 && typeof sale.costPrice === 'number' && sale.costPrice > 0 ? sale.costPrice : 0);
+
+                const existing = repairsActivity.get(rId);
+                if (existing) {
+                    existing.revenue += repairRevenueInThisSaleNominal;
+                    existing.realRevenue += repairRealRevenueInThisSale;
+                    existing.paymentMethods.add(sale.paymentMethod);
+                    if (repairFrozenCost > 0 && (!existing.cost || existing.cost === 0)) {
+                        existing.cost = repairFrozenCost;
                     }
+                    if (new Date(sale.transactionDate) > new Date(existing.lastDate)) {
+                        existing.lastDate = sale.transactionDate;
+                        existing.lastSaleId = sale.id!;
+                        existing.bcvRate = saleBcvRate;
+                        existing.parallelRate = saleParallelRate;
+                        existing.customerName = sale.customerName || repairJob?.customerName || existing.customerName;
+                        existing.customerID = sale.customerID || repairJob?.customerID || existing.customerID;
+                    }
+                } else {
+                    repairsActivity.set(rId, {
+                        revenue: repairRevenueInThisSaleNominal,
+                        realRevenue: repairRealRevenueInThisSale,
+                        repairJob: repairJob || null,
+                        repairItemName: repairItem.name || 'Servicio Técnico',
+                        cost: repairFrozenCost,
+                        lastDate: sale.transactionDate,
+                        lastSaleId: sale.id!,
+                        paymentMethods: new Set([sale.paymentMethod]),
+                        bcvRate: saleBcvRate,
+                        parallelRate: saleParallelRate,
+                        customerName: sale.customerName || repairJob?.customerName || 'GENERAL',
+                        customerID: sale.customerID || repairJob?.customerID || 'N/A'
+                    });
                 }
             }
         }
@@ -187,21 +283,30 @@ export function ExportSalesButton({ sales, products, repairJobs, fiados }: Expor
     // Consolidar líneas de reparación con sus costos prorrateados
     const consolidatedRepairLines = Array.from(repairsActivity.values()).map(entry => {
         const repair = entry.repairJob;
-        const totalPartsCost = [...(repair.reservedParts || []), ...(repair.consumedParts || [])]
-            .reduce((sum, p) => sum + (p.costPrice * p.quantity), 0);
-        
-        const costRatio = repair.estimatedCost > 0 ? totalPartsCost / repair.estimatedCost : 0;
+        let proratedCost = entry.cost || 0;
+
+        if (repair) {
+            const totalPartsCost = [...(repair.reservedParts || []), ...(repair.consumedParts || [])]
+                .reduce((sum, p) => sum + (p.costPrice * p.quantity), 0);
+            
+            const costRatio = repair.estimatedCost > 0 ? totalPartsCost / repair.estimatedCost : 0;
+            if (costRatio > 0) {
+                proratedCost = entry.revenue * costRatio;
+            }
+        }
         
         const nominalIncome = entry.revenue;
         const realIncome = entry.realRevenue;
-        const proratedCost = nominalIncome * costRatio;
         const realProfit = realIncome - proratedCost;
+        const label = repair 
+            ? `REPARACIÓN: ${repair.deviceMake} ${repair.deviceModel}` + (repair.isPromo ? ' [OFERTA]' : '')
+            : (entry.repairItemName && entry.repairItemName.toUpperCase().includes('REPARACIÓN') ? entry.repairItemName : `REPARACIÓN: ${entry.repairItemName || 'Servicio Técnico'}`);
 
         return {
             'Fecha': format(new Date(entry.lastDate), 'dd/MM/yyyy HH:mm'),
-            'Cliente': entry.customerName || repair.customerName,
-            'Cédula/RIF': entry.customerID || repair.customerID,
-            'Producto/Servicio': `REPARACIÓN: ${repair.deviceMake} ${repair.deviceModel}` + (repair.isPromo ? ' [OFERTA]' : ''),
+            'Cliente': entry.customerName || repair?.customerName || 'GENERAL',
+            'Cédula/RIF': entry.customerID || repair?.customerID || 'N/A',
+            'Producto/Servicio': label,
             'ID Transacción': entry.lastSaleId,
             'Costo Inversión ($)': Number(proratedCost.toFixed(2)),
             'Precio Venta Nom. ($)': Number(nominalIncome.toFixed(2)),
@@ -236,6 +341,16 @@ export function ExportSalesButton({ sales, products, repairJobs, fiados }: Expor
 
     XLSX.writeFile(workbook, `Reporte_Ventas_Real_${format(from, "yyyy-MM-dd")}.xlsx`);
     toast({ title: "Excel de Utilidad Real generado" });
+    } catch (error: any) {
+      console.error('Export error:', error);
+      toast({
+        variant: "destructive",
+        title: "Error al exportar",
+        description: error?.message || "Intenta con un rango más pequeño.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -274,9 +389,9 @@ export function ExportSalesButton({ sales, products, repairJobs, fiados }: Expor
           />
         </PopoverContent>
       </Popover>
-      <Button onClick={handleExport} disabled={!date?.from}>
+      <Button onClick={handleExport} disabled={!date?.from || isExporting}>
         <FileDown className="mr-2 h-4 w-4" />
-        Generar Excel de Utilidad Real
+        {isExporting ? 'Generando…' : 'Generar Excel de Utilidad Real'}
       </Button>
     </div>
   );

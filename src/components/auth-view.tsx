@@ -87,7 +87,7 @@ export function AuthView() {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             licenseStatus: 'expired',
-            enabledModules: ['inventory', 'pos', 'repairs', 'reports', 'expenses', 'analysis', 'fiados', 'inventory_aging', 'loans', 'exchange', 'payroll', 'treasury'],
+            enabledModules: ['inventory', 'pos', 'repairs', 'reports', 'expenses', 'analysis', 'fiados', 'inventory_aging'],
             lockedModules: [],
             isPinRequired: false,
           }, { merge: true }).catch(err => console.warn("Background profile creation error:", err));

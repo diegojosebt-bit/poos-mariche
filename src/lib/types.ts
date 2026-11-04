@@ -180,7 +180,7 @@ export type Expense = {
   createdAt: string;
 };
 
-export type UserModule = 'inventory' | 'pos' | 'repairs' | 'reports' | 'analysis' | 'fiados' | 'inventory_aging' | 'loans' | 'expenses' | 'exchange' | 'payroll' | 'treasury';
+export type UserModule = 'inventory' | 'pos' | 'repairs' | 'reports' | 'analysis' | 'fiados' | 'inventory_aging' | 'expenses';
 
 export type CartItem = {
   productId: string;
@@ -194,6 +194,8 @@ export type CartItem = {
   customPrice?: number;
   customCostPrice?: number;
   costPrice?: number; 
+  /** Precio final congelado al añadir al carrito (fallback si el producto sale de la página). */
+  basePrice?: number;
   discount?: number;
 };
 
@@ -344,9 +346,19 @@ export type UserProfile = {
   lastSessionId?: string;
   updatedAt?: string;
   enabledModules?: UserModule[];
+  /** Banderas de despliegue progresivo (Fase 2+). */
+  featureFlags?: Record<string, boolean>;
   securityPin?: string;
   isPinRequired?: boolean;
   lockedModules?: UserModule[];
+  isDataDeletionLocked?: boolean;
+  protectedDataActions?: {
+    deleteSales?: boolean;
+    deleteRepairs?: boolean;
+    deleteProducts?: boolean;
+    deleteFiados?: boolean;
+    deleteExpenses?: boolean;
+  };
   repairWarrantyPolicy?: string;
   repairPickupPolicy?: string;
   repairDisclaimer?: string;

@@ -1,6 +1,6 @@
 'use client';
     
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   DocumentReference,
   onSnapshot,
@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { countServerReads } from '@/lib/firestore/read-meter';
 
 type WithId<T> = T & { id: string };
 
@@ -36,12 +37,17 @@ export function useDoc<T = any>(
     setData(current => typeof updater === 'function' ? updater(current) : updater);
   }, []);
 
+  // Diagnóstico: la primera respuesta de red de cada listener es 1 lectura.
+  const countedInitialRead = useRef(false);
+
   // Refetch se mantiene por compatibilidad, pero onSnapshot ya lo hace solo
   const refetch = useCallback(async () => {
       // El listener de onSnapshot ya mantiene los datos frescos
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
     if (!memoizedDocRef) {
       setData(null);
       setIsLoading(false);
@@ -50,11 +56,19 @@ export function useDoc<T = any>(
 
     setIsLoading(true);
     setError(null);
+    countedInitialRead.current = false;
+
+    const docRef = memoizedDocRef;
 
     // Creamos el escuchador en tiempo real
     const unsubscribe = onSnapshot(
-      memoizedDocRef,
+      docRef,
       (snapshot) => {
+        if (!isMounted) return;
+        if (!snapshot.metadata.fromCache && !countedInitialRead.current) {
+          countedInitialRead.current = true;
+          countServerReads(1, `doc:${docRef.path}`);
+        }
         if (snapshot.exists()) {
           setData({ ...(snapshot.data() as T), id: snapshot.id });
         } else {
@@ -63,10 +77,11 @@ export function useDoc<T = any>(
         setIsLoading(false);
       },
       (err: any) => {
+        if (!isMounted) return;
         console.error("Firestore Doc Listener Error:", err);
         const contextualError = new FirestorePermissionError({
           operation: 'get',
-          path: memoizedDocRef.path,
+          path: docRef.path || 'doc',
         });
         setError(contextualError);
         errorEmitter.emit('permission-error', contextualError);
@@ -75,7 +90,10 @@ export function useDoc<T = any>(
     );
 
     // Limpieza al desmontar el componente
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, [memoizedDocRef]);
 
   return { data, isLoading, error, refetch, mutate };

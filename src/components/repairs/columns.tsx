@@ -1,5 +1,6 @@
 "use client"
 
+import { safeJsonStringify, cleanObject } from "@/lib/json-guard"
 import type { ColumnDef } from "@tanstack/react-table"
 import type { RepairJob, RepairStatus, UserProfile, Product, ReservedPart, Sale } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -11,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, Edit, Trash2, DollarSign, Printer, ArrowUpDown, Loader2, History, Clock, FileText, Tag, StickyNote } from "lucide-react"
+import { MoreHorizontal, Edit, Trash2, DollarSign, Printer, ArrowUpDown, Loader2, History, Clock, FileText, Tag, StickyNote, Lock, CheckCircle } from "lucide-react"
 import { Badge } from "../ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -34,7 +35,6 @@ import { AdminAuthDialog } from "../admin-auth-dialog"
 import { useState, type ReactNode, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
-import { RepairFormDialog } from "./repair-form-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog"
 import { useDashboardStore } from "@/contexts/dashboard-context"
 
@@ -175,24 +175,102 @@ function RepairHistoryDialog({ repairJob, children }: { repairJob: RepairJob, ch
 const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) => {
     const { toast } = useToast();
     const { firestore, user } = useFirebase();
-    const { removeCachedItem } = useDashboardStore();
+    const { removeCachedItem, updateCachedItem, profile } = useDashboardStore();
     const router = useRouter();
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [isDeliverDialogOpen, setIsDeliverDialogOpen] = useState(false);
+    const [isDelivering, setIsDelivering] = useState(false);
     const { bcvRate, parallelRate } = useCurrency();
-    
-    const profileRef = useMemoFirebase(() => 
-        (firestore && user) ? doc(firestore, 'users', user.uid) : null,
-        [firestore, user?.uid]
-    );
-    const { data: profile } = useDoc<UserProfile>(profileRef);
 
-    const estimatedCost = repairJob.estimatedCost || 0;
-    const amountPaid = repairJob.amountPaid || 0;
-    const remainingBalance = estimatedCost - amountPaid;
+    const estimatedCost = Number(repairJob.estimatedCost || 0);
+    const amountPaid = Number(repairJob.amountPaid || 0);
+    const remainingBalance = Math.max(0, estimatedCost - amountPaid);
+    const isFullyPaid = repairJob.isPaid === true || remainingBalance <= 0.009;
+    const hasPendingDebt = !isFullyPaid && remainingBalance > 0.009;
 
     const handlePay = () => {
-        const repairData = encodeURIComponent(JSON.stringify(repairJob));
+        const cleanJob = cleanObject({
+            id: repairJob.id,
+            customerName: repairJob.customerName,
+            customerPhone: repairJob.customerPhone,
+            customerID: repairJob.customerID,
+            deviceMake: repairJob.deviceMake,
+            deviceModel: repairJob.deviceModel,
+            reportedIssue: repairJob.reportedIssue,
+            estimatedCost: repairJob.estimatedCost,
+            amountPaid: repairJob.amountPaid,
+            isPaid: repairJob.isPaid,
+            status: repairJob.status,
+            createdAt: repairJob.createdAt,
+            isPromo: repairJob.isPromo,
+            reservedParts: repairJob.reservedParts,
+            consumedParts: repairJob.consumedParts
+        });
+        const repairData = encodeURIComponent(safeJsonStringify(cleanJob));
         router.push(`/dashboard/pos?repairJob=${repairData}`);
+    };
+
+    const handleDeliverConfirm = async () => {
+        if (!firestore || !user || !repairJob.id || isDelivering) return;
+        if (hasPendingDebt) {
+            toast({
+                variant: "destructive",
+                title: "Entrega Bloqueada por Deuda",
+                description: `Esta reparación tiene un saldo pendiente de $${remainingBalance.toFixed(2)}. Cobra el saldo antes de entregar el equipo.`
+            });
+            return;
+        }
+
+        setIsDelivering(true);
+        try {
+            await runTransaction(firestore, async (transaction) => {
+                const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', repairJob.id!);
+                const jobSnap = await transaction.get(jobRef);
+                if (!jobSnap.exists()) return;
+                const jobData = jobSnap.data() as RepairJob;
+
+                const jobRemaining = Math.max(0, Number(jobData.estimatedCost || 0) - Number(jobData.amountPaid || 0));
+                if (jobRemaining > 0.009 && !jobData.isPaid) {
+                    throw new Error(`Entrega bloqueada: Saldo deudor pendiente de $${jobRemaining.toFixed(2)}.`);
+                }
+
+                const reservedParts = jobData.reservedParts || [];
+                const currentConsumed = jobData.consumedParts || [];
+
+                for (const part of reservedParts) {
+                    if (part.isManual) continue;
+                    const pRef = doc(firestore, 'users', user.uid, 'products', part.productId);
+                    const pSnap = await transaction.get(pRef);
+                    if (pSnap?.exists()) {
+                        const pData = pSnap.data() as Product;
+                        transaction.update(pSnap.ref, {
+                            stockLevel: (pData.stockLevel || 0) - part.quantity,
+                            reservedStock: Math.max(0, (pData.reservedStock || 0) - part.quantity)
+                        });
+                    }
+                }
+
+                const completionDate = new Date();
+                const updateData: Partial<RepairJob> = {
+                    status: 'Completado',
+                    completedAt: completionDate.toISOString(),
+                    warrantyEndDate: addDays(completionDate, 4).toISOString(),
+                    partsConsumed: true,
+                    consumedParts: [...currentConsumed, ...reservedParts],
+                    reservedParts: []
+                };
+
+                updateCachedItem(repairJob.id!, updateData);
+                transaction.update(jobRef, updateData);
+            });
+
+            toast({ title: "Equipo Entregado con Éxito", description: "Se ha finalizado la orden y activado la garantía." });
+            setIsDeliverDialogOpen(false);
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error al entregar", description: error.message });
+        } finally {
+            setIsDelivering(false);
+        }
     };
 
     const handleDelete = async () => {
@@ -280,13 +358,6 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
         });
     }
 
-    const handleOptimisticUpdate = (updatedJob: RepairJob) => {
-        const mutate = (table.options.meta as any)?.mutate;
-        if (mutate) {
-            mutate((prev: any) => prev?.map((j: any) => j.id === updatedJob.id ? updatedJob : j) || null);
-        }
-    };
-
     return (
         <>
             <DropdownMenu>
@@ -299,11 +370,38 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                 <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                     
-                    {remainingBalance > 0.001 && !repairJob.isPaid && (
-                         <DropdownMenuItem onSelect={handlePay} className="text-green-600 font-bold">
+                    {hasPendingDebt && (
+                         <DropdownMenuItem onSelect={() => handlePay()} className="text-amber-600 font-bold bg-amber-50/50">
                             <DollarSign className="mr-2 h-4 w-4" />
-                            Cobrar Saldo
+                            Cobrar Saldo (${remainingBalance.toFixed(2)})
                         </DropdownMenuItem>
+                    )}
+
+                    {repairJob.status !== 'Completado' && (
+                        hasPendingDebt ? (
+                            <DropdownMenuItem 
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    toast({
+                                        variant: "destructive",
+                                        title: "Entrega Bloqueada por Deuda",
+                                        description: `No puedes entregar este equipo. El cliente debe $${remainingBalance.toFixed(2)}. Haz clic en 'Cobrar Saldo' primero.`
+                                    });
+                                }}
+                                className="text-destructive font-semibold opacity-75"
+                            >
+                                <Lock className="mr-2 h-4 w-4 text-destructive" />
+                                Entrega Bloqueada (Debe ${remainingBalance.toFixed(2)})
+                            </DropdownMenuItem>
+                        ) : (
+                            <DropdownMenuItem 
+                                onSelect={() => setIsDeliverDialogOpen(true)} 
+                                className="text-green-600 font-bold bg-green-50/50"
+                            >
+                                <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
+                                Entregar Equipo al Cliente
+                            </DropdownMenuItem>
+                        )
                     )}
 
                     <RepairHistoryDialog repairJob={repairJob}>
@@ -313,38 +411,36 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                         </DropdownMenuItem>
                     </RepairHistoryDialog>
 
-                    <RepairFormDialog repairJob={repairJob} onSaved={handleOptimisticUpdate}>
-                        <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                             <Edit className="mr-2 h-4 w-4" />
-                            Editar / Detalles
-                        </DropdownMenuItem>
-                    </RepairFormDialog>
+                    <DropdownMenuItem onSelect={() => (table.options.meta as any)?.onEditRepair?.(repairJob)}>
+                        <Edit className="mr-2 h-4 w-4" />
+                        Editar / Detalles
+                    </DropdownMenuItem>
                     
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel className="text-[10px] font-black uppercase text-muted-foreground tracking-tighter">Opciones de Impresión</DropdownMenuLabel>
                     
-                    <DropdownMenuItem onSelect={onPrintAll}>
+                    <DropdownMenuItem onSelect={() => onPrintAll()}>
                         <Printer className="mr-2 h-4 w-4 text-primary" />
                         Imprimir Todo (3)
                     </DropdownMenuItem>
                     
-                    <DropdownMenuItem onSelect={onPrintCustomer}>
+                    <DropdownMenuItem onSelect={() => onPrintCustomer()}>
                         <FileText className="mr-2 h-4 w-4 opacity-50" />
                         Nota de Entrega
                     </DropdownMenuItem>
                     
-                    <DropdownMenuItem onSelect={onPrintInternal}>
+                    <DropdownMenuItem onSelect={() => onPrintInternal()}>
                         <StickyNote className="mr-2 h-4 w-4 opacity-50" />
                         Control Interno
                     </DropdownMenuItem>
                     
-                    <DropdownMenuItem onSelect={onPrintSticker}>
+                    <DropdownMenuItem onSelect={() => onPrintSticker()}>
                         <Tag className="mr-2 h-4 w-4 opacity-50" />
                         Etiqueta de Equipo
                     </DropdownMenuItem>
 
                     <DropdownMenuSeparator />
-                    <AdminAuthDialog onAuthorized={() => setIsDeleteDialogOpen(true)}>
+                    <AdminAuthDialog actionType="deleteRepairs" onAuthorized={() => setIsDeleteDialogOpen(true)}>
                         <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={(e) => { e.preventDefault(); }}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Eliminar
@@ -353,11 +449,34 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                 </DropdownMenuContent>
             </DropdownMenu>
 
-            <RepairFormDialog repairJob={repairJob} onSaved={handleOptimisticUpdate}>
-                <button id={`edit-trigger-${repairJob.id}`} style={{ display: 'none' }}></button>
-            </RepairFormDialog>
+            {/* Modal de confirmación de entrega segura */}
+            <AlertDialog open={isDeliverDialogOpen} onOpenChange={setIsDeliverDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2 text-green-700">
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                            ¿Entregar equipo al cliente?
+                        </AlertDialogTitle>
+                        <p className="text-sm text-muted-foreground">
+                            Esta orden se encuentra <strong>totalmente saldada</strong> ($0.00 de deuda). Al confirmar la entrega:
+                        </p>
+                        <ul className="text-xs space-y-1 list-disc pl-5 text-muted-foreground pt-1">
+                            <li>El estado pasará a <strong>ENTREGADO (Completado)</strong>.</li>
+                            <li>Se descontarán definitivamente los repuestos utilizados del inventario.</li>
+                            <li>Se activará la garantía de entrega para el cliente.</li>
+                        </ul>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDelivering}>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDeliverConfirm} disabled={isDelivering} className="bg-green-600 hover:bg-green-700 text-white font-bold">
+                            {isDelivering ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                            Confirmar Entrega
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
-             <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                     <AlertDialogTitle>¿Eliminar este trabajo?</AlertDialogTitle>
@@ -367,7 +486,7 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                     <AlertDialogAction onClick={handleDelete} className="bg-destructive">Eliminar</AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
-             </AlertDialog>
+            </AlertDialog>
         </>
     )
 }
@@ -378,8 +497,24 @@ const StatusCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) 
     const { updateCachedItem } = useDashboardStore();
     const [isUpdating, setIsUpdating] = useState(false);
 
+    const estimatedCost = Number(repairJob.estimatedCost || 0);
+    const amountPaid = Number(repairJob.amountPaid || 0);
+    const remainingBalance = Math.max(0, estimatedCost - amountPaid);
+    const isFullyPaid = repairJob.isPaid === true || remainingBalance <= 0.009;
+    const hasPendingDebt = !isFullyPaid && remainingBalance > 0.009;
+
     const handleStatusChange = async (newStatus: RepairStatus) => {
         if (!firestore || !user || !repairJob.id || repairJob.status === 'Completado' || isUpdating) return;
+
+        // Guardia de interfaz: Bloqueo de entrega si hay deuda
+        if (newStatus === 'Completado' && hasPendingDebt) {
+            toast({
+                variant: "destructive",
+                title: "Entrega Bloqueada por Deuda",
+                description: `No se puede entregar el equipo. Esta reparación tiene un saldo pendiente de $${remainingBalance.toFixed(2)}. Cobra el saldo antes de marcar como completado.`
+            });
+            return;
+        }
         
         setIsUpdating(true);
         try {
@@ -388,6 +523,16 @@ const StatusCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) 
                 const jobSnap = await transaction.get(jobRef);
                 if (!jobSnap.exists()) return;
                 const jobData = jobSnap.data() as RepairJob;
+
+                // Verificación atómica en base de datos
+                if (newStatus === 'Completado') {
+                    const dbEstimated = Number(jobData.estimatedCost || 0);
+                    const dbPaid = Number(jobData.amountPaid || 0);
+                    const dbRemaining = Math.max(0, dbEstimated - dbPaid);
+                    if (dbRemaining > 0.009 && !jobData.isPaid) {
+                        throw new Error(`Entrega bloqueada: Saldo pendiente de $${dbRemaining.toFixed(2)}. Debes cobrar el saldo antes de entregar.`);
+                    }
+                }
 
                 const reservedParts = jobData.reservedParts || [];
                 const currentConsumed = jobData.consumedParts || [];
@@ -430,7 +575,7 @@ const StatusCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) 
                 transaction.update(jobRef, updateData);
             });
 
-            toast({ title: 'Estado Actualizado' });
+            toast({ title: newStatus === 'Completado' ? 'Equipo Entregado y Finalizado' : 'Estado Actualizado' });
         } catch (e: any) {
             toast({ variant: "destructive", title: "Error", description: e.message });
         } finally {
@@ -464,20 +609,47 @@ const StatusCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) 
     }
 
     return (
-        <div className="flex items-center gap-2">
-            {isUpdating && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
-            <Select value={repairJob.status} onValueChange={handleStatusChange} disabled={repairJob.status === 'Completado' || isUpdating}>
-                <SelectTrigger className="w-48 border-0 bg-transparent shadow-none focus:ring-0">
-                    <SelectValue asChild>
-                         <Badge variant={badgeVariant} className={cn(badgeClassName, "cursor-pointer")}>{repairJob.status}</Badge>
-                    </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                    {repairStatuses.map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
+        <div className="flex flex-col gap-1 items-start">
+            <div className="flex items-center gap-2">
+                {isUpdating && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                <Select value={repairJob.status} onValueChange={handleStatusChange} disabled={repairJob.status === 'Completado' || isUpdating}>
+                    <SelectTrigger className="w-auto min-w-[120px] border-0 bg-transparent shadow-none focus:ring-0 p-0 h-auto">
+                        <SelectValue asChild>
+                             <Badge variant={badgeVariant} className={cn(badgeClassName, "cursor-pointer")}>{repairJob.status}</Badge>
+                        </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                        {repairStatuses.map(s => {
+                            const isOptionDisabled = s === 'Completado' && hasPendingDebt;
+                            return (
+                                <SelectItem 
+                                    key={s} 
+                                    value={s}
+                                    disabled={isOptionDisabled}
+                                    className={isOptionDisabled ? "opacity-60 cursor-not-allowed" : ""}
+                                >
+                                    <div className="flex items-center gap-1.5">
+                                        {s === 'Completado' && hasPendingDebt ? (
+                                            <>
+                                                <Lock className="w-3 h-3 text-destructive shrink-0" />
+                                                <span className="text-destructive font-medium">Completado (Debe ${remainingBalance.toFixed(2)})</span>
+                                            </>
+                                        ) : (
+                                            <span>{s}</span>
+                                        )}
+                                    </div>
+                                </SelectItem>
+                            );
+                        })}
+                    </SelectContent>
+                </Select>
+            </div>
+            {hasPendingDebt && (
+                <div className="flex items-center gap-1 text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="Entrega bloqueada hasta saldar deuda">
+                    <Lock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                    <span>Debe ${remainingBalance.toFixed(2)}</span>
+                </div>
+            )}
         </div>
     )
 }
@@ -533,8 +705,38 @@ export const columns: ColumnDef<RepairJob>[] = [
     header: () => <div className="text-right">Pagado</div>,
     cell: function Cell({ row }) {
       const { format, getSymbol } = useCurrency();
-      const amount = parseFloat(row.getValue("amountPaid") || 0)
+      const amount = parseFloat(String(row.getValue("amountPaid") || 0))
       return <div className="text-right font-medium text-green-600 text-xs">{getSymbol()}{format(amount)}</div>
+    },
+  },
+  {
+    id: "remainingBalance",
+    header: () => <div className="text-right">Saldo Deudor</div>,
+    cell: function Cell({ row }) {
+      const { format, getSymbol } = useCurrency();
+      const estimated = parseFloat(String(row.original.estimatedCost || 0));
+      const paid = parseFloat(String(row.original.amountPaid || 0));
+      const debt = Math.max(0, estimated - paid);
+      const isPaid = row.original.isPaid || debt <= 0.009;
+
+      if (isPaid || debt <= 0.009) {
+        return (
+          <div className="text-right">
+            <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 border-green-200 font-semibold">
+              $0.00 Al día
+            </Badge>
+          </div>
+        );
+      }
+
+      return (
+        <div className="text-right flex items-center justify-end gap-1">
+          <Lock className="w-3 h-3 text-destructive" />
+          <span className="font-bold text-destructive text-xs">
+            {getSymbol()}{format(debt)}
+          </span>
+        </div>
+      );
     },
   },
   {

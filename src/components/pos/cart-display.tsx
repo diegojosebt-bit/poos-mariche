@@ -1,5 +1,6 @@
 "use client";
 
+import { cleanObject } from "@/lib/json-guard";
 import type { CartItem, Payment, Product, Sale, RepairJob, ReservedPart } from "@/lib/types";
 import { Button } from "../ui/button";
 import { Trash2, TicketPercent, Gift, ParkingSquare, UserPlus, UserX, UserCheck, Search, BadgePercent, Tag } from "lucide-react";
@@ -9,7 +10,9 @@ import { useCurrency } from "@/hooks/use-currency";
 import { ScrollArea } from "../ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { useFirebase, useDoc, useMemoFirebase, useCollection } from "@/firebase";
-import { doc, runTransaction, type DocumentSnapshot, collection, query, orderBy, increment } from "firebase/firestore";
+import { doc, writeBatch, collection, query, orderBy, increment, serverTimestamp, getDocs, where, limit } from "firebase/firestore";
+import { fetchDocsByIds } from '@/lib/firestore/fetch-by-ids';
+import { dailyRef, monthlyRef, saleStatsWrites } from '@/lib/firestore/rollups';
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
@@ -21,49 +24,52 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { useDashboardStore } from "@/contexts/dashboard-context";
-import { getNextFiscalCounter } from "@/lib/fiscal-helpers";
+import { enqueueOfflineOperation } from "@/lib/offline-sync-manager";
 
 function generateSaleId() {
     const date = new Date();
     return `S-${format(date, "yyMMdd")}-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
-function cleanObject(obj: any): any {
-    if (obj === null || obj === undefined) return obj;
-    const cleaned = { ...obj };
-    Object.keys(cleaned).forEach(key => {
-        if (cleaned[key] === undefined) {
-            delete cleaned[key];
-        } else if (Array.isArray(cleaned[key])) {
-            cleaned[key] = cleaned[key].map((item: any) => 
-                (typeof item === 'object' && item !== null) ? cleanObject(item) : item
-            );
-        } else if (typeof cleaned[key] === 'object' && cleaned[key] !== null) {
-            cleaned[key] = cleanObject(cleaned[key]);
-        }
-    });
-    return cleaned;
-}
-
-function CustomerDialog({ onSave, currentName, currentID, sales }: { onSave: (name: string, id: string) => void, currentName: string, currentID: string, sales: Sale[] }) {
+function CustomerDialog({ onSave, currentName, currentID }: { onSave: (name: string, id: string) => void, currentName: string, currentID: string }) {
+    const { firestore, user } = useFirebase();
     const [open, setOpen] = useState(false);
     const [name, setName] = useState(currentName);
     const [id, setId] = useState(currentID);
+    const [foundCustomer, setFoundCustomer] = useState<string | null>(null);
     const { toast } = useToast();
 
     useEffect(() => {
         if (open) {
             setName(currentName);
             setId(currentID);
+            setFoundCustomer(null);
         }
     }, [open, currentName, currentID]);
 
-    const foundCustomer = useMemo(() => {
-        if (!id || id.length < 5 || !sales) return null;
-        const match = sales.find(s => s.customerID?.toUpperCase().trim() === id.toUpperCase().trim());
-        if (match && match.customerName) return match.customerName;
-        return null;
-    }, [id, sales]);
+    useEffect(() => {
+        if (!id || id.length < 5 || !firestore || !user || !open) {
+            setFoundCustomer(null);
+            return;
+        }
+        const timer = setTimeout(async () => {
+            try {
+                const q = query(
+                    collection(firestore, 'users', user.uid, 'sale_transactions'),
+                    where('customerID', '==', id.toUpperCase().trim()),
+                    limit(1)
+                );
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    const data = snap.docs[0].data();
+                    if (data?.customerName) {
+                        setFoundCustomer(data.customerName);
+                    }
+                }
+            } catch (e) {}
+        }, 400);
+        return () => clearTimeout(timer);
+    }, [id, firestore, user, open]);
 
     const handleApplyCustomerData = () => {
         if (foundCustomer) {
@@ -88,7 +94,7 @@ function CustomerDialog({ onSave, currentName, currentID, sales }: { onSave: (na
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle className="uppercase font-bold">Datos del Cliente</DialogTitle>
-                    <DialogDescription>Estos datos aparecerán en la factura y el reporte de ventas.</DialogDescription>
+                    <DialogDescription>Estos datos aparecerán en la nota de venta y el comprobante.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
                     <div className="space-y-1.5">
@@ -184,11 +190,25 @@ function DiscountItemControl({ productId, currentDiscount, onApply }: { productI
     );
 }
 
+export interface CartDisplayProps {
+  cart: CartItem[];
+  allProducts: Product[];
+  onUpdateQuantity: (productId: string, quantity: number) => void;
+  onUpdateDiscount: (productId: string, discount: number) => void;
+  onRemoveItem: (productId: string, isRepair?: boolean) => void;
+  onClearCart: () => void;
+  onTogglePromo: (productId: string) => void;
+  onToggleGift: (productId: string) => void;
+  onHoldSale?: (name: string, customerName?: string, customerID?: string) => void;
+  onCheckoutSuccess?: (sale: Sale, consumedParts?: ReservedPart[]) => void;
+  repairJobId?: string | null;
+}
+
 export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDiscount, onRemoveItem, onClearCart, repairJobId, onTogglePromo, onToggleGift, onHoldSale, onCheckoutSuccess }: CartDisplayProps) {
   const { firestore, user } = useFirebase();
   const { toast } = useToast();
   const { format: formatCurrency, getFinalPrice, getSymbol, convert, bcvRate, parallelRate } = useCurrency();
-  const { updateCachedItem } = useDashboardStore();
+  const { updateCachedItem, addItemToCache } = useDashboardStore();
   
   const [customerName, setCustomerName] = useState("");
   const [customerID, setCustomerID] = useState("");
@@ -199,13 +219,8 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
   );
   const { data: activeRepairJob } = useDoc<RepairJob>(repairJobRef);
 
-  const salesCol = useMemoFirebase(() => 
-    (firestore && user) ? query(collection(firestore, "users", user.uid, "sale_transactions"), orderBy("transactionDate", "desc")) : null, 
-    [firestore, user?.uid]
-  );
-  const { data: sales } = useCollection<Sale>(salesCol);
 
-  const getPrice = (item: CartItem) => {
+  const getPrice = (item: CartItem, catalog: Product[] = allProducts) => {
     if (item.isGift || item.isWarranty) return 0;
     
     let base = 0;
@@ -217,7 +232,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
             let totalAdditionalDiscount = 0;
             activeRepairJob.reservedParts.forEach(part => {
                 if (!part.isPromo) {
-                    const product = allProducts.find(p => p.id === part.productId);
+                    const product = catalog.find(p => p.id === part.productId);
                     if (product && product.promoPrice && product.promoPrice > 0) {
                         const retailPriceOfPart = getFinalPrice(product);
                         const diff = Math.max(0, retailPriceOfPart - product.promoPrice);
@@ -230,8 +245,12 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
     } else if (item.isCustom) {
         base = item.customPrice || 0;
     } else {
-        const product = allProducts.find(p => p.id === item.productId);
-        if (!product) return 0;
+        const product = catalog.find(p => p.id === item.productId);
+        if (!product) {
+            // Producto fuera de la página y ya no está en RAM: usar el precio
+            // congelado al añadirlo, en lugar de cobrar 0.
+            return Math.max(0, (item.basePrice || 0) - (item.discount || 0));
+        }
         
         base = (item.isPromo && typeof product.promoPrice === 'number' && product.promoPrice > 0) 
             ? product.promoPrice 
@@ -245,19 +264,30 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
 
   const hasPromo = cart.some(i => i.isPromo);
 
-  const handleCheckout = async (payments: Payment[], changeGiven: Payment[], totalChangeInUSD: number, isFiscal: boolean = false): Promise<Sale | null> => {
+  const handleCheckout = async (payments: Payment[], changeGiven: Payment[], totalChangeInUSD: number): Promise<Sale | null> => {
       if (!firestore || !user) return null;
+
+      // Catálogo paginado: si algún artículo no está en RAM, se trae por id
+      // para no registrar costo 0 ni saltarse la validación de stock.
+      let catalog = allProducts;
+      const missingIds = cart
+          .filter((item) => !item.isCustom && !item.isRepair && !catalog.some((p) => p.id === item.productId))
+          .map((item) => item.productId);
+
+      if (missingIds.length > 0) {
+          const fetched = await fetchDocsByIds<Product>(firestore, user.uid, 'products', missingIds);
+          if (fetched.length > 0) catalog = [...catalog, ...fetched];
+      }
 
       const saleId = generateSaleId();
       
       const cartWithPrices = cart.map(item => {
-          const product = allProducts.find(p => p.id === item.productId);
-          const finalCost = item.isCustom ? (item.customCostPrice || 0) : (product?.costPrice || 0);
+          const product = catalog.find(p => p.id === item.productId);
+          const finalCost = item.isCustom ? (item.customCostPrice || 0) : (item.costPrice ?? product?.costPrice ?? 0);
           return { 
               ...item, 
-              price: getPrice(item),
-              costPrice: finalCost,
-              isExempt: !(product?.hasIVA)
+              price: getPrice(item, catalog),
+              costPrice: finalCost
           };
       });
 
@@ -267,53 +297,22 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
           return acc + (p.method === 'Efectivo USD' || p.method === 'USDT / Crypto' ? p.amount : convert(p.amount, 'Bs', 'USD', hasPromo));
       }, 0);
       const actualNetPaidInUSD = totalPaidInUSD - totalChangeInUSD;
-
-      const rateFactor = hasPromo ? 1 : (bcvRate / parallelRate);
-      const realIncomeUSD = actualNetPaidInUSD * rateFactor;
+      const realIncomeUSD = actualNetPaidInUSD;
 
       try {
         const partsToNotify = activeRepairJob?.reservedParts || [];
         let repairUpdateForCache: any = null;
-        let finalGlobalTransactionCost = 0;
-        let fiscalMetadata: any = null;
+        let repairPartsCost = 0;
+        let totalCostUSD = 0;
+        const stockDeductions = new Map<string, { stock: number, reserved: number, salesCount: number }>();
 
-        await runTransaction(firestore, async (transaction) => {
-            const productIdsToGet = new Set<string>();
-            const currentRepairJobSnap = (repairJobId && hasRepairInCart) ? await transaction.get(repairJobRef!) : null;
-            const currentRepairJob = currentRepairJobSnap?.exists() ? currentRepairJobSnap.data() as RepairJob : null;
-
-            if (currentRepairJob?.reservedParts && hasRepairInCart) {
-                currentRepairJob.reservedParts.forEach(p => { if(!p.isManual) productIdsToGet.add(p.productId) });
-            }
-            cartWithPrices.filter(i => !i.isRepair && !i.isCustom).forEach(i => productIdsToGet.add(i.productId));
-
-            const productSnapshots = new Map<string, DocumentSnapshot>();
-            for (const id of Array.from(productIdsToGet)) {
-                const snap = await transaction.get(doc(firestore, 'users', user.uid, 'products', id));
-                productSnapshots.set(id, snap);
-            }
-
-            const statsRef = doc(firestore, 'users', user.uid, 'system', 'estadisticas_actuales');
-            const statsSnap = await transaction.get(statsRef);
-            const currentStats = statsSnap.exists() ? statsSnap.data() : { totalRealSales30d: 0, totalRealProfit30d: 0 };
-
-            if (isFiscal) {
-                const { invoiceNumber, controlNumber } = await getNextFiscalCounter(transaction, firestore, user.uid);
-                fiscalMetadata = {
-                    invoiceNumber,
-                    controlNumber,
-                    bcvRate: bcvRate,
-                    ivaPercent: 16,
-                    igtfPercent: 3
-                };
-            }
-
-            let totalCostUSD = 0;
-            const stockDeductions = new Map<string, { stock: number, reserved: number, salesCount: number }>();
-
-            if (currentRepairJob?.reservedParts && hasRepairInCart) {
-                for (const part of currentRepairJob.reservedParts) {
-                    totalCostUSD += (part.costPrice * part.quantity);
+        // 1. Validar y acumular costos de repuestos de reparación si aplica
+        if (activeRepairJob && hasRepairInCart) {
+            if (activeRepairJob.reservedParts) {
+                for (const part of activeRepairJob.reservedParts) {
+                    const partCost = (part.costPrice * part.quantity);
+                    repairPartsCost += partCost;
+                    totalCostUSD += partCost;
                     if (part.isManual) continue;
                     const current = stockDeductions.get(part.productId) || { stock: 0, reserved: 0, salesCount: 0 };
                     stockDeductions.set(part.productId, { 
@@ -323,128 +322,152 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                     });
                 }
             }
-
-            for (const item of cartWithPrices) {
-                if (item.isRepair) continue;
-                if (item.isCustom) {
-                    totalCostUSD += (item.customCostPrice || 0) * item.quantity;
-                    continue;
+            if (repairPartsCost === 0 && activeRepairJob.consumedParts && activeRepairJob.consumedParts.length > 0 && !activeRepairJob.partsConsumed) {
+                for (const part of activeRepairJob.consumedParts) {
+                    repairPartsCost += (part.costPrice * part.quantity);
                 }
-                const pSnap = productSnapshots.get(item.productId);
-                if (pSnap?.exists()) {
-                    totalCostUSD += (pSnap.data() as Product).costPrice * item.quantity;
-                }
+            }
+        }
 
-                const current = stockDeductions.get(item.productId) || { stock: 0, reserved: 0, salesCount: 0 };
-                stockDeductions.set(item.productId, { 
-                    stock: current.stock + item.quantity, 
-                    reserved: current.reserved,
-                    salesCount: current.salesCount + item.quantity
+        // 2. Procesar productos regulares desde memoria RAM (allProducts)
+        for (const item of cartWithPrices) {
+            if (item.isRepair) continue;
+            if (item.isCustom) {
+                totalCostUSD += (item.customCostPrice || 0) * item.quantity;
+                continue;
+            }
+            const product = catalog.find(p => p.id === item.productId);
+            totalCostUSD += (item.costPrice ?? product?.costPrice ?? 0) * item.quantity;
+
+            const current = stockDeductions.get(item.productId) || { stock: 0, reserved: 0, salesCount: 0 };
+            stockDeductions.set(item.productId, { 
+                stock: current.stock + item.quantity, 
+                reserved: current.reserved,
+                salesCount: current.salesCount + item.quantity
+            });
+        }
+
+        // 3. Verificación de stock disponible en memoria RAM (0ms de latencia, 0 lecturas)
+        for (const [pid, ded] of Array.from(stockDeductions.entries())) {
+            const product = catalog.find(p => p.id === pid);
+            if (product && product.stockLevel < ded.stock) {
+                throw new Error(`¡Inventario Bloqueado! Solo quedan ${product.stockLevel} ${product.unit || 'un.'} de "${product.name}".`);
+            }
+        }
+
+        const profitUSD = realIncomeUSD - totalCostUSD;
+
+        // 4. Congelación precisa de costo unitario por artículo
+        const itemsWithPreciseCost = cartWithPrices.map(item => {
+            if (item.isRepair) {
+                return {
+                    ...item,
+                    costPrice: Number((repairPartsCost / (item.quantity || 1)).toFixed(2))
+                };
+            }
+            if (item.isCustom) {
+                return {
+                    ...item,
+                    costPrice: Number((item.customCostPrice || 0).toFixed(2))
+                };
+            }
+            const product = catalog.find(p => p.id === item.productId);
+            const unitCost = item.costPrice ?? product?.costPrice ?? 0;
+            return {
+                ...item,
+                costPrice: Number(unitCost.toFixed(2))
+            };
+        });
+
+        // 5. Preparar actualización de reparación si aplica
+        if (repairJobId && activeRepairJob && hasRepairInCart) {
+            const otherItemsTotal = cartWithPrices
+                .filter(i => !i.isRepair)
+                .reduce((sum, i) => sum + (i.price * i.quantity), 0);
+            
+            const paidToRepair = Math.max(0, actualNetPaidInUSD - otherItemsTotal);
+            
+            let additionalDiscountToApply = 0;
+            const repairItem = cartWithPrices.find(i => i.isRepair);
+            if (repairItem?.isPromo && activeRepairJob.reservedParts) {
+                activeRepairJob.reservedParts.forEach(part => {
+                    if (!part.isPromo) {
+                        const product = catalog.find(p => p.id === part.productId);
+                        if (product && product.promoPrice && product.promoPrice > 0) {
+                            additionalDiscountToApply += (getFinalPrice(product) - product.promoPrice) * part.quantity;
+                        }
+                    }
                 });
             }
 
-            finalGlobalTransactionCost = totalCostUSD;
-            const profitUSD = realIncomeUSD - totalCostUSD;
+            const newEstimatedCost = activeRepairJob.estimatedCost - additionalDiscountToApply;
+            const newPaidTotal = (activeRepairJob.amountPaid || 0) + paidToRepair;
+            const isFullyPaid = newPaidTotal >= (newEstimatedCost - 0.01);
 
-            for (const [pid, ded] of Array.from(stockDeductions.entries())) {
-                const pSnap = productSnapshots.get(pid);
-                if (pSnap?.exists()) {
-                    const data = pSnap.data() as Product;
-                    if (data.stockLevel < ded.stock) {
-                        throw new Error(`¡Inventario Bloqueado! Solo quedan ${data.stockLevel} ${data.unit || 'un.'} de "${data.name}".`);
-                    }
+            repairUpdateForCache = { 
+                estimatedCost: Number(newEstimatedCost.toFixed(2)),
+                amountPaid: Number(newPaidTotal.toFixed(2)), 
+                isPaid: isFullyPaid,
+                status: isFullyPaid ? 'Pagado' : activeRepairJob.status,
+                partsConsumed: true,
+                consumedParts: [...(activeRepairJob.consumedParts || []), ...(activeRepairJob.reservedParts || [])],
+                reservedParts: []
+            };
+        }
 
-                    transaction.update(pSnap.ref, { 
-                        stockLevel: data.stockLevel - ded.stock,
-                        reservedStock: Math.max(0, (data.reservedStock || 0) - ded.reserved),
-                        salesCount: increment(ded.salesCount)
-                    });
-                }
-            }
-
-            if (repairJobId && currentRepairJob && hasRepairInCart) {
-                const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', repairJobId);
-                const otherItemsTotal = cartWithPrices
-                    .filter(i => !i.isRepair)
-                    .reduce((sum, i) => sum + (i.price * i.quantity), 0);
-                
-                const paidToRepair = Math.max(0, actualNetPaidInUSD - otherItemsTotal);
-                
-                let additionalDiscountToApply = 0;
-                const repairItem = cartWithPrices.find(i => i.isRepair);
-                if (repairItem?.isPromo && currentRepairJob.reservedParts) {
-                    currentRepairJob.reservedParts.forEach(part => {
-                        if (!part.isPromo) {
-                            const product = allProducts.find(p => p.id === part.productId);
-                            if (product && product.promoPrice && product.promoPrice > 0) {
-                                additionalDiscountToApply += (getFinalPrice(product) - product.promoPrice) * part.quantity;
-                            }
-                        }
-                    });
-                }
-
-                const newEstimatedCost = currentRepairJob.estimatedCost - additionalDiscountToApply;
-                const newPaidTotal = (currentRepairJob.amountPaid || 0) + paidToRepair;
-                const isFullyPaid = newPaidTotal >= (newEstimatedCost - 0.01);
-
-                repairUpdateForCache = { 
-                    estimatedCost: Number(newEstimatedCost.toFixed(2)),
-                    amountPaid: Number(newPaidTotal.toFixed(2)), 
-                    isPaid: isFullyPaid,
-                    status: isFullyPaid ? 'Pagado' : currentRepairJob.status,
-                    partsConsumed: true,
-                    consumedParts: [...(currentRepairJob.consumedParts || []), ...(currentRepairJob.reservedParts || [])],
-                    reservedParts: []
-                };
-
-                transaction.update(jobRef, repairUpdateForCache);
-            }
-
-            transaction.set(statsRef, {
-                totalRealSales30d: (currentStats.totalRealSales30d || 0) + realIncomeUSD,
-                totalRealProfit30d: (currentStats.totalRealProfit30d || 0) + profitUSD,
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-
-            const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', saleId);
-            const saleData = cleanObject({
-                id: saleId,
-                items: cartWithPrices,
-                customerName: customerName || null,
-                customerID: customerID || null,
-                subtotal: total, discount: 0, totalAmount: total,
-                costPrice: Number(totalCostUSD.toFixed(2)), 
-                paymentMethod: payments.map(p => p.method).join(', '),
-                transactionDate: new Date().toISOString(),
-                payments, status: 'completed',
-                repairJobId: (repairJobId && hasRepairInCart) ? repairJobId : null,
-                ...(changeGiven.length > 0 && { changeGiven, totalChangeInUSD }),
-                actualPaidAmount: actualNetPaidInUSD,
-                bcvRateAtTime: bcvRate,
-                parallelRateAtTime: parallelRate,
-                isFiscal,
-                docType: isFiscal ? 'FISCAL_INVOICE' : 'DELIVERY_NOTE',
-                fiscalMetadata
-            });
-
-            transaction.set(saleRef, saleData);
+        // 6. Construir objeto limpio de la venta
+        const saleData = cleanObject({
+            id: saleId,
+            items: itemsWithPreciseCost,
+            customerName: customerName || null,
+            customerID: customerID || null,
+            subtotal: total, 
+            discount: 0, 
+            totalAmount: total,
+            costPrice: Number(totalCostUSD.toFixed(2)), 
+            paymentMethod: payments.map(p => p.method).join(', '),
+            transactionDate: new Date().toISOString(),
+            payments, 
+            status: 'completed',
+            repairJobId: (repairJobId && hasRepairInCart) ? repairJobId : null,
+            ...(changeGiven.length > 0 && { changeGiven, totalChangeInUSD }),
+            actualPaidAmount: actualNetPaidInUSD,
+            bcvRateAtTime: bcvRate,
+            parallelRateAtTime: parallelRate,
         });
+
+        const stockDeductionsList = Array.from(stockDeductions.entries()).map(([productId, ded]) => ({
+            productId,
+            stock: ded.stock,
+            reserved: ded.reserved,
+            salesCount: ded.salesCount
+        }));
+
+        // 7. ACTUALIZACIÓN OPTIMISTA EN MEMORIA RAM (Inmediata, 0 ms)
+        for (const ded of stockDeductionsList) {
+            const product = catalog.find(p => p.id === ded.productId);
+            if (product) {
+                updateCachedItem(ded.productId, {
+                    stockLevel: Math.max(0, (product.stockLevel || 0) - ded.stock),
+                    reservedStock: Math.max(0, (product.reservedStock || 0) - ded.reserved),
+                    salesCount: (product.salesCount || 0) + ded.salesCount
+                });
+            }
+        }
 
         if (repairJobId && repairUpdateForCache) {
             updateCachedItem(repairJobId, repairUpdateForCache);
         }
 
-        toast({ title: isFiscal ? "Factura Fiscal Generada Exitosamente" : "Venta Completada con Éxito" });
-        
         const resultSale = { 
             id: saleId, 
-            items: cartWithPrices, 
+            items: itemsWithPreciseCost, 
             customerName: customerName || undefined,
             customerID: customerID || undefined,
             subtotal: total, 
             discount: 0, 
             totalAmount: total, 
-            costPrice: finalGlobalTransactionCost, 
+            costPrice: totalCostUSD, 
             payments, 
             transactionDate: new Date().toISOString(), 
             status: 'completed',
@@ -453,10 +476,95 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
             repairJobId: (repairJobId && hasRepairInCart) ? repairJobId : null,
             bcvRateAtTime: bcvRate,
             parallelRateAtTime: parallelRate,
-            isFiscal,
-            docType: isFiscal ? 'FISCAL_INVOICE' : 'DELIVERY_NOTE',
-            fiscalMetadata
         } as Sale;
+
+        addItemToCache('sale_transactions', resultSale);
+
+        // 8. DESPACHO INMEDIATO O ENCOLADO OFFLINE (0 LECTURAS)
+        const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+
+        if (isOnline) {
+            try {
+                const batch = writeBatch(firestore);
+
+                // Documento de venta
+                const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', saleId);
+                batch.set(saleRef, saleData);
+
+                // Deducciones de inventario (0 lecturas)
+                for (const ded of stockDeductionsList) {
+                    const pRef = doc(firestore, 'users', user.uid, 'products', ded.productId);
+                    batch.update(pRef, {
+                        stockLevel: increment(-ded.stock),
+                        reservedStock: increment(-ded.reserved),
+                        salesCount: increment(ded.salesCount),
+                        updatedAt: serverTimestamp()
+                    });
+                }
+
+                // Estadísticas 30d (0 lecturas)
+                const statsRef = doc(firestore, 'users', user.uid, 'system', 'estadisticas_actuales');
+                batch.set(statsRef, {
+                    totalRealSales30d: increment(realIncomeUSD),
+                    totalRealProfit30d: increment(profitUSD),
+                    updatedAt: serverTimestamp()
+                }, { merge: true });
+
+                // Fase 1: agregados diarios y mensuales (0 lecturas).
+                // Si el cálculo falla, la venta se registra igual: los stats se
+                // pueden reconstruir con el script de reconciliación.
+                try {
+                    const stats = saleStatsWrites(resultSale);
+                    batch.set(dailyRef(firestore, user.uid, stats.day), stats.daily, { merge: true });
+                    batch.set(monthlyRef(firestore, user.uid, stats.day.slice(0, 7)), stats.monthly, { merge: true });
+                } catch (statsError) {
+                    console.warn('[POS] No se pudieron preparar los agregados:', statsError);
+                }
+
+                // Reparación si aplica
+                if (repairJobId && repairUpdateForCache) {
+                    const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', repairJobId);
+                    batch.update(jobRef, repairUpdateForCache);
+                }
+
+                await batch.commit();
+                toast({ title: "Venta Registrada con Éxito" });
+            } catch (networkOrWriteErr) {
+                console.warn("[POS] Falló escritura remota directa, guardando en cola offline:", networkOrWriteErr);
+                enqueueOfflineOperation(user.uid, {
+                    id: saleId,
+                    type: 'SALE_CHECKOUT',
+                    payload: {
+                        saleId,
+                        saleData,
+                        stockDeductions: stockDeductionsList,
+                        repairUpdate: (repairJobId && repairUpdateForCache) ? { repairJobId, data: repairUpdateForCache } : null,
+                        statsUpdate: { incomeUSD: realIncomeUSD, profitUSD }
+                    }
+                });
+                toast({ 
+                    title: "Venta Guardada Localmente", 
+                    description: "Se guardó en memoria y se sincronizará automáticamente al regresar la conexión." 
+                });
+            }
+        } else {
+            // Modo Offline directo
+            enqueueOfflineOperation(user.uid, {
+                id: saleId,
+                type: 'SALE_CHECKOUT',
+                payload: {
+                    saleId,
+                    saleData,
+                    stockDeductions: stockDeductionsList,
+                    repairUpdate: (repairJobId && repairUpdateForCache) ? { repairJobId, data: repairUpdateForCache } : null,
+                    statsUpdate: { incomeUSD: realIncomeUSD, profitUSD }
+                }
+            });
+            toast({ 
+                title: "Venta Guardada Localmente (Modo Offline)", 
+                description: "Se guardó en memoria y se sincronizará automáticamente al regresar el internet." 
+            });
+        }
 
         if (onCheckoutSuccess) {
             onCheckoutSuccess(resultSale, partsToNotify);
@@ -466,10 +574,10 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
         setCustomerID("");
         return resultSale;
       } catch (e: any) {
-        console.error("Transacción mixta fallida:", e);
+        console.error("Operación fallida:", e);
         toast({ 
             variant: "destructive", 
-            title: "Error de Sincronización", 
+            title: "Error en Venta", 
             description: e.message || "No se pudo completar la operación." 
         });
         return null;
@@ -490,7 +598,6 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                 onSave={(name, id) => { setCustomerName(name); setCustomerID(id); }} 
                 currentName={customerName} 
                 currentID={customerID} 
-                sales={sales || []}
             />
         </div>
       <ScrollArea className="flex-1 bg-white">
@@ -543,7 +650,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                                     <span className={cn((item.isGift || item.isWarranty) && "line-through text-muted-foreground")}>{item.name}</span>
                                     <div className="flex flex-wrap gap-1">
                                         {item.isPromo && <Badge className="bg-blue-600 text-white text-[9px] h-4 px-1">OFERTA</Badge>}
-                                        {(item.discount || 0) > 0 && <Badge variant="outline" className="text-[9px] h-4 px-1 border-amber-200 text-amber-700 font-bold">-${item.discount.toFixed(2)} DESC</Badge>}
+                                        {(item.discount || 0) > 0 && <Badge variant="outline" className="text-[9px] h-4 px-1 border-amber-200 text-amber-700 font-bold">-${(item.discount ?? 0).toFixed(2)} DESC</Badge>}
                                         {item.isGift && <Badge className="bg-green-600 text-white text-[9px] h-4 px-1">OBSEQUIO</Badge>}
                                         {item.isWarranty && <Badge className="bg-orange-600 text-white text-[9px] h-4 px-1">GARANTÍA</Badge>}
                                         {item.isRepair && <Badge variant="outline" className="text-[9px] h-4 px-1">REPARACIÓN</Badge>}
