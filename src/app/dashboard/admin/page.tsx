@@ -355,7 +355,15 @@ function AdminContent() {
         (firestore && currentUser) ? query(collection(firestore, "users"), limit(100)) : null, 
         [firestore, currentUser?.uid]
     );
-    const { data: users, isLoading } = useCollection<UserProfile>(usersCollection);
+    const { data: users, isLoading, refetch } = useCollection<UserProfile>(usersCollection);
+
+    // El panel de admin necesita la lista REAL de negocios, no la copia de
+    // IndexedDB: se fuerza una lectura de servidor al entrar (5–100 docs).
+    useEffect(() => {
+        if (!currentUser) return;
+        void refetch();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentUser?.uid]);
 
     const activeUsers = useMemo(() => {
         if (!users) return 0;
@@ -414,7 +422,17 @@ function AdminContent() {
 
     return (
         <>
-            <PageHeader title="Administración Central" />
+            <PageHeader title="Administración Central">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { void refetch(); }}
+                    disabled={isLoading}
+                >
+                    <RefreshCw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
+                    Sincronizar
+                </Button>
+            </PageHeader>
             <main className="flex-1 p-4 sm:p-6 space-y-6 max-w-7xl mx-auto w-full">
                 <div className="grid gap-6 md:grid-cols-2">
                     <Card className="shadow-sm border-primary/10">
