@@ -59,7 +59,7 @@ const ACTION_DESCRIPTIONS: Record<AdminActionType, { title: string; desc: string
   },
   editProducts: {
     title: "Edición de Producto",
-    desc: "Vas a modificar precios o stock del inventario. Confirma para continuar."
+    desc: "Ingresa el PIN de Administrador para modificar precios y stock del inventario."
   },
   general: {
     title: "Validación de Administrador",
@@ -80,9 +80,17 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
   // Consumimos el perfil del Store Global
   const { profile } = useDashboardStore();
 
+  // Solo se exige PIN para editar si el dueño lo activó Y existe un PIN real.
+  // Evita el bug anterior: undefined !== false convertía la edición en "protegida" siempre.
+  const editNeedsPin =
+    actionType === 'editProducts' &&
+    profile?.requirePinForProductEdit === true &&
+    !!profile?.securityPin;
+
   // Comprobación de seguridad: ¿Esta acción requiere PIN?
   const isProtected = () => {
     if (!profile) return false;
+    if (actionType === 'editProducts') return editNeedsPin;
     // Sin PIN configurado no hay nada que validar: se permite con advertencia.
     if (!profile.securityPin) return false;
     // Si la seguridad global por PIN está activa
@@ -122,9 +130,9 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
     return () => clearInterval(interval);
   }, [lockoutUntil]);
 
-  // Editar un producto NO es una acción destructiva: solo se advierte.
-  // (Antes se pedía el PIN de eliminación y, sin PIN configurado, era un callejón sin salida.)
-  if (actionType === 'editProducts') {
+  // Editar un producto NO es una acción destructiva: si no se exigió PIN,
+  // solo se advierte. Si se exigió PIN (y existe), cae en el diálogo de abajo.
+  if (actionType === 'editProducts' && !editNeedsPin) {
     return (
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>{children}</DialogTrigger>

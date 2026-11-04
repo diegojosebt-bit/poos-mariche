@@ -352,6 +352,8 @@ export type UserProfile = {
   isPinRequired?: boolean;
   lockedModules?: UserModule[];
   isDataDeletionLocked?: boolean;
+  /** Exigir PIN al editar productos (solo aplica si hay PIN configurado). */
+  requirePinForProductEdit?: boolean;
   protectedDataActions?: {
     deleteSales?: boolean;
     deleteRepairs?: boolean;

@@ -139,6 +139,7 @@ function SettingsContent() {
     const [isPinRequired, setIsPinRequired] = useState(false);
     const [lockedModules, setLockedModules] = useState<UserModule[]>([]);
     const [isDataDeletionLocked, setIsDataDeletionLocked] = useState(true);
+    const [requirePinForProductEdit, setRequirePinForProductEdit] = useState(false);
     const [protectedDataActions, setProtectedDataActions] = useState({
         deleteSales: true,
         deleteRepairs: true,
@@ -228,6 +229,7 @@ function SettingsContent() {
             setIsPinRequired(profile.isPinRequired === true);
             setLockedModules(profile.lockedModules || ['reports', 'analysis']);
             setIsDataDeletionLocked(profile.isDataDeletionLocked ?? true);
+            setRequirePinForProductEdit(profile.requirePinForProductEdit === true);
             setProtectedDataActions({
                 deleteSales: profile.protectedDataActions?.deleteSales ?? true,
                 deleteRepairs: profile.protectedDataActions?.deleteRepairs ?? true,
@@ -283,7 +285,7 @@ function SettingsContent() {
             toast({ variant: "destructive", title: "PIN Inválido", description: "El PIN debe tener entre 4 y 8 dígitos." });
             return;
         }
-        if ((isDataDeletionLocked || isPinRequired) && !profile?.securityPin && !newPin) {
+        if ((isDataDeletionLocked || isPinRequired || requirePinForProductEdit) && !profile?.securityPin && !newPin) {
             toast({ variant: "destructive", title: "PIN Requerido", description: "Define un PIN de Administrador (4 a 8 dígitos) para proteger los datos." });
             return;
         }
@@ -294,6 +296,7 @@ function SettingsContent() {
                 isPinRequired, 
                 lockedModules,
                 isDataDeletionLocked,
+                requirePinForProductEdit,
                 protectedDataActions
             };
             if (newPin) updateData.securityPin = newPin;
@@ -408,6 +411,37 @@ function SettingsContent() {
                                         );
                                     }
                                 }} 
+                            />
+                        </div>
+
+                        <div className="flex items-center justify-between p-4 rounded-xl border bg-white shadow-sm">
+                            <div className="space-y-0.5 max-w-[80%]">
+                                <Label className="text-sm font-black uppercase text-foreground flex items-center gap-2">
+                                    <Lock className="w-4 h-4 text-primary" /> Exigir PIN para editar productos
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                    Protege cambios de precio, stock y datos del producto. Si no hay PIN configurado,
+                                    la edición solo muestra una advertencia (nunca un modal sin salida).
+                                </p>
+                                {!profile?.securityPin && (
+                                    <p className="text-[10px] font-bold text-amber-600 uppercase">
+                                        Crea un PIN abajo para poder activarlo.
+                                    </p>
+                                )}
+                            </div>
+                            <Switch
+                                checked={requirePinForProductEdit}
+                                disabled={!profile?.securityPin && !newPin}
+                                onCheckedChange={(val) => {
+                                    if (val && !profile?.securityPin && !newPin) {
+                                        toast({
+                                            title: "Define tu PIN",
+                                            description: "Ingresa un PIN de 4 a 8 dígitos abajo para exigirlo al editar productos.",
+                                        });
+                                        return;
+                                    }
+                                    setRequirePinForProductEdit(val);
+                                }}
                             />
                         </div>
 
