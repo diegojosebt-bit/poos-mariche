@@ -100,6 +100,11 @@ function CustomerDialog({ onSave, currentName, currentID }: { onSave: (name: str
                     <div className="space-y-1.5">
                         <Label className="text-[10px] font-black uppercase">Cédula / RIF</Label>
                         <Input 
+                            name="mm-customer-id"
+                            autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="characters"
+                            spellCheck={false}
                             value={id} 
                             onChange={(e) => setId(e.target.value.toUpperCase())} 
                             placeholder="EJ: V-12345678" 
@@ -123,6 +128,11 @@ function CustomerDialog({ onSave, currentName, currentID }: { onSave: (name: str
                     <div className="space-y-1.5">
                         <Label className="text-[10px] font-black uppercase">Nombre y Apellido</Label>
                         <Input 
+                            name="mm-customer-name"
+                            autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="characters"
+                            spellCheck={false}
                             value={name} 
                             onChange={(e) => setName(e.target.value.toUpperCase())} 
                             placeholder="EJ: JUAN PEREZ" 
@@ -173,6 +183,8 @@ function DiscountItemControl({ productId, currentDiscount, onApply }: { productI
                     <Label className="text-[10px] font-black uppercase text-muted-foreground">Descuento ($/un)</Label>
                     <Input 
                         type="number" 
+                        name="mm-item-discount"
+                        autoComplete="off"
                         step="0.01" 
                         value={tempVal} 
                         onChange={(e) => setTempVal(e.target.value)}

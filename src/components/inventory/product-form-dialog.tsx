@@ -279,7 +279,7 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
         </div>
         
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="px-4 sm:px-6 space-y-6 pb-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} autoComplete="off" className="px-4 sm:px-6 space-y-6 pb-6">
             <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem>
                     <FormLabel className="text-[10px] font-bold uppercase">Nombre del Artículo</FormLabel>

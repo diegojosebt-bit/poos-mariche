@@ -101,6 +101,13 @@ export function SecurityGate({ children, module }: SecurityGateProps) {
                             <KeyRound className="absolute left-3 top-3 h-5 w-5 text-muted-foreground opacity-50" />
                             <Input 
                                 type="password" 
+                                name="mm-gate-pin"
+                                autoComplete="new-password"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                spellCheck={false}
+                                autoCorrect="off"
+                                autoCapitalize="none"
                                 placeholder="••••" 
                                 value={pin} 
                                 onChange={(e) => setPin(e.target.value)}

@@ -108,6 +108,12 @@ export function DataTable<TData, TValue>({
                         setGlobalFilter(event.target.value)
                     }
                     className="pr-8"
+                    type="search"
+                    name="mm-table-search"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                 />
                 {isServerSearching && (
                   <div className="absolute right-2.5 top-2.5 text-primary">

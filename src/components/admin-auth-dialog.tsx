@@ -59,7 +59,7 @@ const ACTION_DESCRIPTIONS: Record<AdminActionType, { title: string; desc: string
   },
   editProducts: {
     title: "Edición de Producto",
-    desc: "Ingresa el PIN de Administrador para modificar precios y stock del inventario."
+    desc: "Vas a modificar precios o stock del inventario. Confirma para continuar."
   },
   general: {
     title: "Validación de Administrador",
@@ -75,6 +75,7 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const { toast } = useToast();
+  const router = useRouter();
   
   // Consumimos el perfil del Store Global
   const { profile } = useDashboardStore();
@@ -82,6 +83,8 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
   // Comprobación de seguridad: ¿Esta acción requiere PIN?
   const isProtected = () => {
     if (!profile) return false;
+    // Sin PIN configurado no hay nada que validar: se permite con advertencia.
+    if (!profile.securityPin) return false;
     // Si la seguridad global por PIN está activa
     if (profile.isPinRequired === true) return true;
     // Si el bloqueo específico de datos está activo
@@ -118,6 +121,43 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
   }, [lockoutUntil]);
+
+  // Editar un producto NO es una acción destructiva: solo se advierte.
+  // (Antes se pedía el PIN de eliminación y, sin PIN configurado, era un callejón sin salida.)
+  if (actionType === 'editProducts') {
+    return (
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>{children}</DialogTrigger>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="uppercase font-black flex items-center gap-2 text-base">
+              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+              Edición de Producto
+            </DialogTitle>
+            <DialogDescription className="font-medium text-xs text-muted-foreground pt-1">
+              Vas a modificar precios, stock o datos del producto. Los cambios se guardan al confirmar y quedan
+              registrados con tu usuario.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              className="font-bold"
+              onClick={() => {
+                setOpen(false);
+                onAuthorized();
+              }}
+            >
+              Continuar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   // Si no está protegido, pasa directamente sin modal
   if (!isProtected()) {
@@ -194,8 +234,6 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
     }
   };
 
-  const router = useRouter();
-
   return (
     <Dialog open={open} onOpenChange={(v) => {
       if (!isLockedOut) {
@@ -257,7 +295,14 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
               <div className="relative">
                 <Input
                   id="admin-security-pin"
+                  name="mm-admin-pin"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="none"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -299,7 +344,7 @@ export function AdminAuthDialog({ children, onAuthorized, actionType = 'general'
             disabled={isLockedOut || !profile?.securityPin || !password.trim()}
             className="font-bold bg-destructive hover:bg-destructive/90 text-white shadow-md"
           >
-            Autorizar Eliminación
+            {actionType.startsWith('delete') ? 'Autorizar Eliminación' : 'Autorizar'}
           </Button>
         </DialogFooter>
       </DialogContent>

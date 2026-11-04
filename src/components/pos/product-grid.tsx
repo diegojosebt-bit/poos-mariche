@@ -114,6 +114,11 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
                 <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                     type="search"
+                    name="mm-pos-search"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     placeholder="Buscar producto o escanear código..."
                     className="w-full pl-8 h-8 text-xs"
                     value={searchTerm}
