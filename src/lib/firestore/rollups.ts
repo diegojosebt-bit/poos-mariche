@@ -65,11 +65,16 @@ const safeFieldKey = (id: string) => id.replace(/[.~*/[\]\s]/g, '_');
 export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
   const day = dayKeyFromIso(sale.transactionDate);
   const revenue = (sale.actualPaidAmount ?? sale.totalAmount ?? 0) * sign;
-  const cost =
-    sale.items.reduce(
-      (sum, item) => sum + (item.costPrice ?? item.customCostPrice ?? 0) * item.quantity,
-      0,
-    ) * sign;
+  const itemsNominal = sale.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const itemsCostSum = sale.items.reduce(
+    (sum, item) => sum + (item.costPrice ?? item.customCostPrice ?? 0) * item.quantity,
+    0,
+  );
+
+  // Ventas antiguas sin costo por artículo: se rescata el costo total de la venta
+  // y se reparte proporcional al precio, para que el reporte no muestre costo 0.
+  const effectiveCost = itemsCostSum > 0 ? itemsCostSum : Number(sale.costPrice || 0);
+  const cost = effectiveCost * sign;
   const profit = revenue - cost;
 
   const monthly: Record<string, unknown> = {
@@ -102,23 +107,28 @@ export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
 
   // Ingreso por artículo prorrateado al cobrado real (igual que el reporte).
   const paidNominal = sale.actualPaidAmount ?? sale.totalAmount ?? 0;
-  const itemsNominal = sale.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const collectionRatio = itemsNominal > 0 ? paidNominal / itemsNominal : 1;
+
+  const fallbackUnitCost = itemsCostSum === 0 && Number(sale.costPrice || 0) > 0 && itemsNominal > 0
+    ? Number(sale.costPrice) / itemsNominal
+    : 0;
 
   for (const item of sale.items) {
     if (item.isCustom || !item.productId) continue;
     const key = safeFieldKey(item.productId);
+    const unitCost = Number(item.costPrice ?? item.customCostPrice ?? 0) || fallbackUnitCost * item.price;
     daily[`items.${key}.n`] = item.name;
     daily[`items.${key}.q`] = increment(item.quantity * sign);
     daily[`items.${key}.rev`] = increment(item.price * item.quantity * collectionRatio * sign);
-    daily[`items.${key}.cost`] = increment((item.costPrice ?? 0) * item.quantity * sign);
+    daily[`items.${key}.cost`] = increment(unitCost * item.quantity * sign);
   }
 
   return { daily, monthly, day };
 }
 
 /** Payload de un gasto. `sign = -1` al eliminarlo. */
-export function expenseStatsWrites(expense: Expense, sign: 1 | -1 = 1): StatsWrites {  const day = dayKeyFromIso(expense.createdAt);
+export function expenseStatsWrites(expense: Expense, sign: 1 | -1 = 1): StatsWrites {
+  const day = dayKeyFromIso(expense.createdAt);
   const amountUSD = (expense.amountUSD ?? 0) * sign;
   const amountBs = (expense.amountBs ?? 0) * sign;
 

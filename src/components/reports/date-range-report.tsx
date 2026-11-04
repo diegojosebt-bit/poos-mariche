@@ -490,15 +490,16 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                             <TableRow className="bg-muted/30">
                                 <TableHead className="text-[10px] font-black uppercase">Producto / Servicio</TableHead>
                                 <TableHead className="text-center text-[10px] font-black uppercase">Cant.</TableHead>
+                                <TableHead className="text-right text-[10px] font-black uppercase">P. Unit. ($)</TableHead>
                                 <TableHead className="text-right text-[10px] font-black uppercase">Costo Inversión ($)</TableHead>
-                                <TableHead className="text-right text-[10px] font-black uppercase">Ingreso ($)</TableHead>
+                                <TableHead className="text-right text-[10px] font-black uppercase">Ingreso Total ($)</TableHead>
                                 <TableHead className="text-right text-[10px] font-black uppercase">Ganancia ($)</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {stats.itemsBreakdown.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground italic uppercase font-bold text-xs">
+                                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground italic uppercase font-bold text-xs">
                                         No hay transacciones registradas en este periodo.
                                     </TableCell>
                                 </TableRow>
@@ -513,6 +514,9 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-center font-mono text-xs font-bold">{item.quantity}</TableCell>
+                                        <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                                            ${formatCurrency(item.quantity > 0 ? item.totalRevenue / item.quantity : 0)}
+                                        </TableCell>
                                         <TableCell className="text-right font-mono text-xs text-muted-foreground">${formatCurrency(item.totalCost)}</TableCell>
                                         <TableCell className="text-right font-mono text-xs font-bold text-slate-700">${formatCurrency(item.totalRevenue)}</TableCell>
                                         <TableCell className="text-right">
@@ -530,7 +534,7 @@ export function DateRangeReport({ sales, products, reconciliations, repairJobs, 
                         {stats.itemsBreakdown.length > 0 && (
                             <TableFooter className="bg-primary/5 font-black">
                                 <TableRow>
-                                    <TableCell colSpan={2} className="text-[10px] uppercase text-primary">Totales del Periodo:</TableCell>
+                                    <TableCell colSpan={3} className="text-[10px] uppercase text-primary">Totales del Periodo:</TableCell>
                                     <TableCell className="text-right text-xs">${formatCurrency(stats.totalProductCosts)}</TableCell>
                                     <TableCell className="text-right text-xs">${formatCurrency(stats.totalSales)}</TableCell>
                                     <TableCell className="text-right">

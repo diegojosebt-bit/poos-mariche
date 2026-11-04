@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { cn } from "@/lib/utils";
 import { ReconciliationTicket, handlePrintReconciliation } from "./reconciliation-ticket";
 import { useDashboardStore } from "@/contexts/dashboard-context";
+import { queryCache } from "@/lib/firestore/query-cache";
 
 type CashReconciliationDialogProps = {
   openSales: Sale[];
@@ -227,9 +228,12 @@ export function CashReconciliationDialog({ openSales }: CashReconciliationDialog
       // 1. Marcamos las ventas como conciliadas en el caché global para que desaparezcan de la vista "Abierta"
       openSales.forEach(sale => {
           updateCachedItem(sale.id!, { reconciliationId: reconciliationId });
+          // También la caché paginada: sin esto la venta sigue contando como "abierta".
+          queryCache.patchItem(user.uid, 'sale_transactions', sale.id!, { reconciliationId: reconciliationId });
       });
       // 2. Añadimos el nuevo reporte de cierre al historial en memoria
       addItemToCache('daily_reconciliations', newReconciliation);
+      queryCache.mergeIntoCatalog(user.uid, 'daily_reconciliations', [newReconciliation as any]);
 
       // 3. Actualizamos las configuraciones y los saldos iniciales en el estado global de la app
       if (settings) {
