@@ -68,14 +68,15 @@ function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
         });
 
         try {
-            // OPTIMISTIC UPDATE
+            await batch.commit();
+
+            // Actualizar la caché solo cuando Firestore confirmó el borrado.
             const mutate = (table.options.meta as any)?.mutate;
             if (mutate) {
                 const idsToDelete = selectedRows.map(r => r.original.id);
                 mutate((prev: any) => prev?.filter((p: any) => !idsToDelete.includes(p.id)) || null);
             }
 
-            await batch.commit();
             toast({
                 title: "Productos Eliminados",
                 description: `${selectedRows.length} productos han sido eliminados.`,

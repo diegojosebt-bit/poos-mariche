@@ -39,23 +39,35 @@ const ActionsCell = ({ product, table }: { product: Product, table: any }) => {
     const { firestore, user } = useFirebase();
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
-    const handleDelete = () => {
+    const handleDelete = async () => {
         if (!firestore || !user || !product.id) return;
-        
-        // OPTIMISTIC DELETE
-        const mutate = (table.options.meta as any)?.mutate;
-        if (mutate) {
-            mutate((prev: any) => prev?.filter((p: any) => p.id !== product.id) || null);
-        }
 
         const productRef = doc(firestore, 'users', user.uid, 'products', product.id);
-        deleteDocumentNonBlocking(productRef);
-        toast({
-            title: "Producto Eliminado",
-            description: `${product.name} ha sido eliminado del inventario.`,
-            variant: "destructive"
-        })
-        setIsDeleteDialogOpen(false);
+
+        try {
+            // Primero Firestore; si falla, la fila no desaparece falsamente.
+            await deleteDocumentNonBlocking(productRef);
+
+            // Limpiar la caché recién cuando el borrado fue confirmado.
+            const mutate = (table.options.meta as any)?.mutate;
+            if (mutate) {
+                mutate((prev: any) => prev?.filter((p: any) => p.id !== product.id) || null);
+            }
+
+            toast({
+                title: "Producto Eliminado",
+                description: `${product.name} ha sido eliminado del inventario.`,
+                variant: "destructive"
+            });
+        } catch (error) {
+            toast({
+                variant: "destructive",
+                title: "Error al eliminar",
+                description: "No se pudo eliminar el producto. Intenta de nuevo.",
+            });
+        } finally {
+            setIsDeleteDialogOpen(false);
+        }
     }
     
     const handleTriggerEdit = () => {

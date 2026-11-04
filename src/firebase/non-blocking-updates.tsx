@@ -97,23 +97,12 @@ export async function updateDocumentNonBlocking(docRef: DocumentReference, data:
 }
 
 /**
- * Realiza un deleteDoc con lógica de Soft Delete para productos
+ * Realiza un deleteDoc físico (hard delete) para cualquier colección.
+ * Los productos también se eliminan de la base, sin soft delete.
  */
 export async function deleteDocumentNonBlocking(docRef: DocumentReference) {
   try {
-    const isProduct = docRef.path.includes('/products/');
-    
-    if (isProduct) {
-        // SOFT DELETE: No borramos físicamente, marcamos como eliminado
-        const promise = updateDoc(docRef, {
-            isDeleted: true,
-            updatedAt: serverTimestamp()
-        });
-        return await promise;
-    } else {
-        // Borrado físico estándar para otras colecciones
-        return await deleteDoc(docRef);
-    }
+    return await deleteDoc(docRef);
   } catch (error) {
     errorEmitter.emit(
         'permission-error',

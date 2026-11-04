@@ -10,6 +10,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { MoreHorizontal, Edit, Trash2, DollarSign, Printer, ArrowUpDown, Loader2, History, Clock, FileText, Tag, StickyNote, Lock, CheckCircle } from "lucide-react"
@@ -37,6 +40,7 @@ import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog"
 import { useDashboardStore } from "@/contexts/dashboard-context"
+import { queryCache } from "@/lib/firestore/query-cache"
 
 const repairStatuses: RepairStatus[] = ['Pendiente', 'Pagado', 'Completado', 'Garantía'];
 
@@ -261,6 +265,7 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                 };
 
                 updateCachedItem(repairJob.id!, updateData);
+                queryCache.patchItem(user.uid, 'repair_jobs', repairJob.id!, updateData);
                 transaction.update(jobRef, updateData);
             });
 
@@ -275,13 +280,11 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
 
     const handleDelete = async () => {
         if (!firestore || !repairJob.id || !user) return;
+        const jobId = repairJob.id;
         
         try {
-            // ELIMINACIÓN GLOBAL INSTANTÁNEA
-            removeCachedItem(repairJob.id);
-
             await runTransaction(firestore, async (transaction) => {
-                const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', repairJob.id!);
+                const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', jobId);
                 const jobSnap = await transaction.get(jobRef);
                 if (!jobSnap.exists()) return;
                 const data = jobSnap.data() as RepairJob;
@@ -325,6 +328,11 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                 
                 transaction.delete(jobRef);
             });
+
+            // Limpiar AMBAS cachés: la legacy (dataCache) y la paginada (queryCache).
+            // Sin esto el documento se borra en Firestore pero la fila sigue visible.
+            removeCachedItem(jobId);
+            queryCache.removeItem(user.uid, 'repair_jobs', jobId);
 
             toast({ title: "Trabajo Eliminado", variant: "destructive" });
         } catch (error: any) {
@@ -370,39 +378,24 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                 <DropdownMenuContent align="end">
                     <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                     
-                    {hasPendingDebt && (
-                         <DropdownMenuItem onSelect={() => handlePay()} className="text-amber-600 font-bold bg-amber-50/50">
+                    {hasPendingDebt ? (
+                        <DropdownMenuItem
+                            onSelect={() => handlePay()}
+                            className="text-amber-600 font-bold bg-amber-50/50"
+                            title="La entrega se habilita al saldar la deuda"
+                        >
                             <DollarSign className="mr-2 h-4 w-4" />
                             Cobrar Saldo (${remainingBalance.toFixed(2)})
                         </DropdownMenuItem>
-                    )}
-
-                    {repairJob.status !== 'Completado' && (
-                        hasPendingDebt ? (
-                            <DropdownMenuItem 
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    toast({
-                                        variant: "destructive",
-                                        title: "Entrega Bloqueada por Deuda",
-                                        description: `No puedes entregar este equipo. El cliente debe $${remainingBalance.toFixed(2)}. Haz clic en 'Cobrar Saldo' primero.`
-                                    });
-                                }}
-                                className="text-destructive font-semibold opacity-75"
-                            >
-                                <Lock className="mr-2 h-4 w-4 text-destructive" />
-                                Entrega Bloqueada (Debe ${remainingBalance.toFixed(2)})
-                            </DropdownMenuItem>
-                        ) : (
-                            <DropdownMenuItem 
-                                onSelect={() => setIsDeliverDialogOpen(true)} 
-                                className="text-green-600 font-bold bg-green-50/50"
-                            >
-                                <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
-                                Entregar Equipo al Cliente
-                            </DropdownMenuItem>
-                        )
-                    )}
+                    ) : repairJob.status !== 'Completado' ? (
+                        <DropdownMenuItem 
+                            onSelect={() => setIsDeliverDialogOpen(true)} 
+                            className="text-green-600 font-bold bg-green-50/50"
+                        >
+                            <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
+                            Entregar Equipo al Cliente
+                        </DropdownMenuItem>
+                    ) : null}
 
                     <RepairHistoryDialog repairJob={repairJob}>
                         <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
@@ -417,27 +410,32 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                     </DropdownMenuItem>
                     
                     <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-[10px] font-black uppercase text-muted-foreground tracking-tighter">Opciones de Impresión</DropdownMenuLabel>
-                    
-                    <DropdownMenuItem onSelect={() => onPrintAll()}>
-                        <Printer className="mr-2 h-4 w-4 text-primary" />
-                        Imprimir Todo (3)
-                    </DropdownMenuItem>
-                    
-                    <DropdownMenuItem onSelect={() => onPrintCustomer()}>
-                        <FileText className="mr-2 h-4 w-4 opacity-50" />
-                        Nota de Entrega
-                    </DropdownMenuItem>
-                    
-                    <DropdownMenuItem onSelect={() => onPrintInternal()}>
-                        <StickyNote className="mr-2 h-4 w-4 opacity-50" />
-                        Control Interno
-                    </DropdownMenuItem>
-                    
-                    <DropdownMenuItem onSelect={() => onPrintSticker()}>
-                        <Tag className="mr-2 h-4 w-4 opacity-50" />
-                        Etiqueta de Equipo
-                    </DropdownMenuItem>
+
+                    <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                            <Printer className="mr-2 h-4 w-4 text-primary" />
+                            Imprimir
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                            <DropdownMenuItem onSelect={() => onPrintAll()}>
+                                <Printer className="mr-2 h-4 w-4 text-primary" />
+                                Imprimir todo (3)
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={() => onPrintCustomer()}>
+                                <FileText className="mr-2 h-4 w-4 opacity-70" />
+                                Nota de entrega
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => onPrintInternal()}>
+                                <StickyNote className="mr-2 h-4 w-4 opacity-70" />
+                                Control interno
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => onPrintSticker()}>
+                                <Tag className="mr-2 h-4 w-4 opacity-70" />
+                                Etiqueta de equipo
+                            </DropdownMenuItem>
+                        </DropdownMenuSubContent>
+                    </DropdownMenuSub>
 
                     <DropdownMenuSeparator />
                     <AdminAuthDialog actionType="deleteRepairs" onAuthorized={() => setIsDeleteDialogOpen(true)}>
@@ -571,6 +569,7 @@ const StatusCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) 
 
                 // ACTUALIZACIÓN GLOBAL INSTANTÁNEA (0ms)
                 updateCachedItem(repairJob.id!, updateData);
+                queryCache.patchItem(user.uid, 'repair_jobs', repairJob.id!, updateData);
 
                 transaction.update(jobRef, updateData);
             });
