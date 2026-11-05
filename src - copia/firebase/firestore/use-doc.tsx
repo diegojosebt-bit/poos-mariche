@@ -1,0 +1,100 @@
+'use client';
+    
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  DocumentReference,
+  onSnapshot,
+  DocumentData,
+  FirestoreError,
+} from 'firebase/firestore';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
+import { countServerReads } from '@/lib/firestore/read-meter';
+
+type WithId<T> = T & { id: string };
+
+export interface UseDocResult<T> {
+  data: WithId<T> | null;
+  isLoading: boolean;
+  error: FirestoreError | Error | null;
+  refetch: () => Promise<void>;
+  mutate: (newData: WithId<T> | ((prev: WithId<T> | null) => WithId<T> | null)) => void;
+}
+
+/**
+ * Hook de Tiempo Real (PUSH).
+ * Usa onSnapshot para asegurar que los datos se actualicen instantáneamente
+ * sin necesidad de refrescar la página, manteniendo eficiencia en lecturas.
+ */
+export function useDoc<T = any>(
+  memoizedDocRef: DocumentReference<DocumentData> | null | undefined,
+): UseDocResult<T> {
+  const [data, setData] = useState<WithId<T> | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<FirestoreError | Error | null>(null);
+
+  const mutate = useCallback((updater: WithId<T> | ((prev: WithId<T> | null) => WithId<T> | null)) => {
+    setData(current => typeof updater === 'function' ? updater(current) : updater);
+  }, []);
+
+  // Diagnóstico: la primera respuesta de red de cada listener es 1 lectura.
+  const countedInitialRead = useRef(false);
+
+  // Refetch se mantiene por compatibilidad, pero onSnapshot ya lo hace solo
+  const refetch = useCallback(async () => {
+      // El listener de onSnapshot ya mantiene los datos frescos
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!memoizedDocRef) {
+      setData(null);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    countedInitialRead.current = false;
+
+    const docRef = memoizedDocRef;
+
+    // Creamos el escuchador en tiempo real
+    const unsubscribe = onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (!isMounted) return;
+        if (!snapshot.metadata.fromCache && !countedInitialRead.current) {
+          countedInitialRead.current = true;
+          countServerReads(1, `doc:${docRef.path}`);
+        }
+        if (snapshot.exists()) {
+          setData({ ...(snapshot.data() as T), id: snapshot.id });
+        } else {
+          setData(null);
+        }
+        setIsLoading(false);
+      },
+      (err: any) => {
+        if (!isMounted) return;
+        console.error("Firestore Doc Listener Error:", err);
+        const contextualError = new FirestorePermissionError({
+          operation: 'get',
+          path: docRef.path || 'doc',
+        });
+        setError(contextualError);
+        errorEmitter.emit('permission-error', contextualError);
+        setIsLoading(false);
+      }
+    );
+
+    // Limpieza al desmontar el componente
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [memoizedDocRef]);
+
+  return { data, isLoading, error, refetch, mutate };
+}
