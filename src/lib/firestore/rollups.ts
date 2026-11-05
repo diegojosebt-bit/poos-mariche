@@ -65,8 +65,9 @@ const safeFieldKey = (id: string) => id.replace(/[.~*/[\]\s]/g, '_');
 export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
   const day = dayKeyFromIso(sale.transactionDate);
   const revenue = (sale.actualPaidAmount ?? sale.totalAmount ?? 0) * sign;
-  const itemsNominal = sale.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const itemsCostSum = sale.items.reduce(
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  const itemsNominal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const itemsCostSum = items.reduce(
     (sum, item) => sum + (item.costPrice ?? item.customCostPrice ?? 0) * item.quantity,
     0,
   );
@@ -77,7 +78,7 @@ export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
   const cost = effectiveCost * sign;
   const profit = revenue - cost;
 
-  const monthly: Record<string, unknown> = {
+  const totals = {
     salesUSD: increment(revenue),
     salesCount: increment(sign),
     costUSD: increment(cost),
@@ -85,42 +86,63 @@ export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
     updatedAt: serverTimestamp(),
   };
 
-  const daily: Record<string, unknown> = { ...monthly };
+  const monthly: Record<string, any> = { ...totals, byMethod: {}, byDay: {} };
+  const daily: Record<string, any> = { ...totals, byMethod: {} };
 
-  for (const payment of sale.payments ?? []) {
-    const field = `byMethod.${methodKey(payment.method)}`;
-    monthly[field] = increment(payment.amount * sign);
-    daily[field] = increment(payment.amount * sign);
-  }
+  // IMPORTANTE: se escriben MAPAS ANIDADOS, no claves con puntos.
+  // `set({ 'byMethod.cashUSD': x }, { merge: true })` crea el campo literal
+  // "byMethod.cashUSD" y el reporte nunca encuentra byMethod/items.
+  const methodDeltas: Record<string, number> = {};
+  const addMethod = (method: string, amount: number) => {
+    const key = methodKey(method);
+    methodDeltas[key] = (methodDeltas[key] ?? 0) + amount;
+  };
 
+  for (const payment of sale.payments ?? []) addMethod(payment.method, payment.amount * sign);
   // El vuelto reduce el neto por método (el reporte muestra flujo neto).
-  for (const change of sale.changeGiven ?? []) {
-    const field = `byMethod.${methodKey(change.method)}`;
-    monthly[field] = increment(-change.amount * sign);
-    daily[field] = increment(-change.amount * sign);
+  for (const change of sale.changeGiven ?? []) addMethod(change.method, -change.amount * sign);
+
+  for (const [key, amount] of Object.entries(methodDeltas)) {
+    monthly.byMethod[key] = increment(amount);
+    daily.byMethod[key] = increment(amount);
   }
 
   const dayNumber = day.slice(8, 10);
-  monthly[`byDay.${dayNumber}.salesUSD`] = increment(revenue);
-  monthly[`byDay.${dayNumber}.profitUSD`] = increment(profit);
-  monthly[`byDay.${dayNumber}.count`] = increment(sign);
+  monthly.byDay[dayNumber] = {
+    salesUSD: increment(revenue),
+    profitUSD: increment(profit),
+    count: increment(sign),
+  };
 
   // Ingreso por artículo prorrateado al cobrado real (igual que el reporte).
   const paidNominal = sale.actualPaidAmount ?? sale.totalAmount ?? 0;
   const collectionRatio = itemsNominal > 0 ? paidNominal / itemsNominal : 1;
-
   const fallbackUnitCost = itemsCostSum === 0 && Number(sale.costPrice || 0) > 0 && itemsNominal > 0
     ? Number(sale.costPrice) / itemsNominal
     : 0;
 
-  for (const item of sale.items) {
+  const itemDeltas: Record<string, { n: string; q: number; rev: number; cost: number }> = {};
+
+  for (const item of items) {
     if (item.isCustom || !item.productId) continue;
     const key = safeFieldKey(item.productId);
     const unitCost = Number(item.costPrice ?? item.customCostPrice ?? 0) || fallbackUnitCost * item.price;
-    daily[`items.${key}.n`] = item.name;
-    daily[`items.${key}.q`] = increment(item.quantity * sign);
-    daily[`items.${key}.rev`] = increment(item.price * item.quantity * collectionRatio * sign);
-    daily[`items.${key}.cost`] = increment(unitCost * item.quantity * sign);
+    const current = itemDeltas[key] ?? { n: item.name, q: 0, rev: 0, cost: 0 };
+    current.n = item.name;
+    current.q += item.quantity * sign;
+    current.rev += item.price * item.quantity * collectionRatio * sign;
+    current.cost += unitCost * item.quantity * sign;
+    itemDeltas[key] = current;
+  }
+
+  daily.items = {};
+  for (const [key, value] of Object.entries(itemDeltas)) {
+    daily.items[key] = {
+      n: value.n,
+      q: increment(value.q),
+      rev: increment(value.rev),
+      cost: increment(value.cost),
+    };
   }
 
   return { daily, monthly, day };
@@ -150,8 +172,10 @@ export function expenseStatsWrites(expense: Expense, sign: 1 | -1 = 1): StatsWri
 /** Actualiza el pendiente total de fiados en `stats/overview` (create/pago/delete). */
 export function fiadoOverviewWrites(prevPending: number, nextPending: number) {
   return {
-    'fiados.pendingAmount': increment(nextPending - prevPending),
-    'fiados.pendingCount': increment((nextPending > 0 ? 1 : 0) - (prevPending > 0 ? 1 : 0)),
+    fiados: {
+      pendingAmount: increment(nextPending - prevPending),
+      pendingCount: increment((nextPending > 0 ? 1 : 0) - (prevPending > 0 ? 1 : 0)),
+    },
     updatedAt: serverTimestamp(),
   };
 }
