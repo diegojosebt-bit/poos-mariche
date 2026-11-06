@@ -471,6 +471,8 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
 
         if (repairJobId && repairUpdateForCache) {
             updateCachedItem(repairJobId, repairUpdateForCache);
+            // La lista paginada de Reparaciones debe reflejar el pago sin recargar.
+            queryCache.patchItem(user.uid, 'repair_jobs', repairJobId, repairUpdateForCache);
         }
 
         const resultSale = { 

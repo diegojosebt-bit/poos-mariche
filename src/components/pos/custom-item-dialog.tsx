@@ -13,41 +13,89 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus } from "lucide-react";
+import { ArrowLeftRight, Plus } from "lucide-react";
 import { useCurrency } from "@/hooks/use-currency";
 
 type CustomItemDialogProps = {
   onAddCustomItem: (name: string, price: number, costPrice: number) => void;
 };
 
+type CurrencyMode = "USD" | "Bs";
+
 export function CustomItemDialog({ onAddCustomItem }: CustomItemDialogProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [costPrice, setCostPrice] = useState<string>("");
-  const [priceBs, setPriceBs] = useState<string>("");
+  const [price, setPrice] = useState<string>("");
+  const [costCurrency, setCostCurrency] = useState<CurrencyMode>("USD");
+  const [priceCurrency, setPriceCurrency] = useState<CurrencyMode>("Bs");
 
-  const { format, bcvRate } = useCurrency();
+  const { format, convert, bcvRate, parallelRate } = useCurrency();
 
-  const costUsd = parseFloat(costPrice) || 0;
-  const priceBsNum = parseFloat(priceBs);
-  const priceUsd = !isNaN(priceBsNum) && bcvRate > 0 ? priceBsNum / bcvRate : 0;
+  const costNum = parseFloat(costPrice) || 0;
+  const priceNum = parseFloat(price);
+
+  // Costo: si viene en Bs se protege a tasa paralelo.
+  // Venta: si viene en Bs se factura a BCV.
+  const costUsd = costCurrency === "Bs"
+    ? convert(costNum, "Bs", "USD", true)
+    : costNum;
+
+  const priceUsd = !isNaN(priceNum)
+    ? (priceCurrency === "Bs" ? convert(priceNum, "Bs", "USD") : priceNum)
+    : 0;
+
   const profit = priceUsd - costUsd;
   const margin = priceUsd > 0 ? (profit / priceUsd) * 100 : 0;
-  const hasPrice = !isNaN(priceBsNum) && priceUsd > 0;
+  const hasPrice = !isNaN(priceNum) && priceUsd > 0;
+
+  const costEquivalent = costNum > 0
+    ? costCurrency === "Bs"
+      ? `≈ $${format(costUsd)}`
+      : `≈ Bs ${format(convert(costNum, "USD", "Bs", true))}`
+    : "";
+
+  const priceEquivalent = hasPrice
+    ? priceCurrency === "Bs"
+      ? `≈ $${format(priceUsd)}`
+      : `≈ Bs ${format(convert(priceNum, "USD", "Bs"))}`
+    : "";
+
+  const toggleCostCurrency = () => {
+    const value = parseFloat(costPrice);
+    if (!isNaN(value) && value > 0) {
+      const next = costCurrency === "USD"
+        ? convert(value, "USD", "Bs", true)
+        : convert(value, "Bs", "USD", true);
+      setCostPrice(next.toFixed(2));
+    }
+    setCostCurrency((current) => (current === "USD" ? "Bs" : "USD"));
+  };
+
+  const togglePriceCurrency = () => {
+    const value = parseFloat(price);
+    if (!isNaN(value) && value > 0) {
+      const next = priceCurrency === "Bs"
+        ? convert(value, "Bs", "USD")
+        : convert(value, "USD", "Bs");
+      // 6 decimales al pasar a USD para no perder Bs al volver.
+      setPrice(next.toFixed(priceCurrency === "Bs" ? 6 : 2));
+    }
+    setPriceCurrency((current) => (current === "Bs" ? "USD" : "Bs"));
+  };
 
   const handleAdd = () => {
     if (!name.trim() || !hasPrice) return;
 
     onAddCustomItem(
       name.trim().toUpperCase(),
-      // Se guarda con precisión para que al volver a Bs no se pierdan céntimos.
       Number(priceUsd.toFixed(6)),
       Number(costUsd.toFixed(2)),
     );
 
     setName("");
     setCostPrice("");
-    setPriceBs("");
+    setPrice("");
     setOpen(false);
   };
 
@@ -62,7 +110,7 @@ export function CustomItemDialog({ onAddCustomItem }: CustomItemDialogProps) {
         <DialogHeader>
           <DialogTitle className="uppercase font-bold">Venta Rápida</DialogTitle>
           <DialogDescription className="text-xs">
-            Costo en dólares y precio en bolívares. Se convierte a USD con la tasa BCV.
+            Toca el título de cada campo para cambiar entre $ y Bs.
           </DialogDescription>
         </DialogHeader>
 
@@ -85,9 +133,15 @@ export function CustomItemDialog({ onAddCustomItem }: CustomItemDialogProps) {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="custom-cost" className="text-[10px] font-bold uppercase">
-                Costo ($)
-              </Label>
+              <button
+                type="button"
+                onClick={toggleCostCurrency}
+                aria-label="Cambiar moneda del costo"
+                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-foreground hover:text-primary"
+              >
+                Costo ({costCurrency === "Bs" ? "Bs" : "$"})
+                <ArrowLeftRight className="w-3 h-3 opacity-50" />
+              </button>
               <Input
                 id="custom-cost"
                 name="mm-custom-cost"
@@ -101,11 +155,21 @@ export function CustomItemDialog({ onAddCustomItem }: CustomItemDialogProps) {
                 onChange={(e) => setCostPrice(e.target.value)}
                 className="h-10 font-mono"
               />
+              {costEquivalent && (
+                <p className="text-[10px] text-muted-foreground text-right">{costEquivalent}</p>
+              )}
             </div>
+
             <div className="space-y-2">
-              <Label htmlFor="custom-price" className="text-[10px] font-bold uppercase">
-                Venta (Bs)
-              </Label>
+              <button
+                type="button"
+                onClick={togglePriceCurrency}
+                aria-label="Cambiar moneda de la venta"
+                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-foreground hover:text-primary"
+              >
+                Venta ({priceCurrency === "Bs" ? "Bs" : "$"})
+                <ArrowLeftRight className="w-3 h-3 opacity-50" />
+              </button>
               <Input
                 id="custom-price"
                 name="mm-custom-price"
@@ -114,16 +178,14 @@ export function CustomItemDialog({ onAddCustomItem }: CustomItemDialogProps) {
                 step="0.01"
                 min="0"
                 autoComplete="off"
-                placeholder="0,00"
-                value={priceBs}
-                onChange={(e) => setPriceBs(e.target.value)}
+                placeholder={priceCurrency === "Bs" ? "0,00" : "0.00"}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
                 className="h-10 font-mono"
               />
-              {hasPrice && (
-                <p className="text-[10px] font-bold text-primary text-right">
-                  ≈ ${format(priceUsd)}
-                </p>
+              {priceEquivalent && (
+                <p className="text-[10px] font-bold text-primary text-right">{priceEquivalent}</p>
               )}
             </div>
           </div>
@@ -141,7 +203,7 @@ export function CustomItemDialog({ onAddCustomItem }: CustomItemDialogProps) {
           )}
 
           <p className="text-[10px] text-muted-foreground text-center">
-            Tasa BCV: Bs {format(bcvRate)} por USD
+            Costo en Bs: paralelo Bs {format(parallelRate)} · Venta en Bs: BCV Bs {format(bcvRate)}
           </p>
         </div>
 

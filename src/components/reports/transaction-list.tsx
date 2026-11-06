@@ -13,6 +13,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "../ui/skeleton";
 import { AdminAuthDialog } from "../admin-auth-dialog";
+import { TablePaginationBar } from "../table-pagination-bar";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui/alert-dialog";
 import { useFirebase } from "@/firebase";
 import { useDashboardStore } from "@/contexts/dashboard-context";
@@ -540,29 +541,32 @@ export function TransactionList({ sales, isLoading, hasMore, isLoadingMore, onLo
                     </Accordion>
                 )}
 
-                {onLoadMore && hasMore && (
-                    <div className="flex justify-center pt-2">
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={onLoadMore}
-                            disabled={isLoadingMore}
-                            className="h-9 px-4 text-[10px] font-black uppercase tracking-tighter"
-                        >
-                            {isLoadingMore && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-                            {hasMore ? 'Cargar 100 más' : 'Historial completo'}
-                        </Button>
-                    </div>
-                )}
-
-                {totalPages > 1 && (
-                    <div className="flex items-center justify-between py-6 border-t mt-4">
-                        <span className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Página {currentPage} de {totalPages}</span>
-                        <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="h-9 px-4 text-[10px] font-black uppercase tracking-tighter shadow-sm"><ChevronLeft className="w-3.5 h-3.5 mr-1" /> Anterior</Button>
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="h-9 px-4 text-[10px] font-black uppercase tracking-tighter shadow-sm">Siguiente <ChevronRight className="w-3.5 h-3.5 ml-1" /></Button>
-                        </div>
-                    </div>
+                {(totalPages > 1 || (onLoadMore && hasMore)) && (
+                    <TablePaginationBar
+                        page={currentPage}
+                        totalPages={totalPages}
+                        totalItems={filteredSales.length}
+                        rangeStart={filteredSales.length === 0 ? 0 : ((currentPage - 1) * ITEMS_PER_PAGE) + 1}
+                        rangeEnd={Math.min(currentPage * ITEMS_PER_PAGE, filteredSales.length)}
+                        itemLabel="ventas"
+                        actions={onLoadMore && hasMore ? (
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={onLoadMore}
+                                disabled={isLoadingMore}
+                                className="h-8 px-2.5 text-[10px] font-black uppercase"
+                            >
+                                {isLoadingMore && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                                <span className="hidden sm:inline">Cargar 100 más</span>
+                                <span className="sm:hidden">+100</span>
+                            </Button>
+                        ) : undefined}
+                        onPrevious={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        onNext={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        canPrevious={currentPage > 1}
+                        canNext={currentPage < totalPages}
+                    />
                 )}
             </div>
         </div>

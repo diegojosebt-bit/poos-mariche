@@ -7,13 +7,15 @@ import {
   Wrench,
   ShoppingCart,
   BarChart2,
-  User,
+  Settings,
   ShieldCheck,
   Lock,
   Download,
   Receipt,
   TrendingUp,
-  HandCoins
+  HandCoins,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import {
   Sidebar,
@@ -22,12 +24,13 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarFooter
+  SidebarFooter,
+  useSidebar
 } from '@/components/ui/sidebar';
-import { AppLogo } from '@/components/icons';
+import { BrandLockup } from '@/components/icons';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
-import { useFirebase } from '@/firebase';
 import { useDashboardStore } from '@/contexts/dashboard-context';
 import type { UserProfile, UserModule } from '@/lib/types';
 import { useState, useEffect } from 'react';
@@ -52,7 +55,7 @@ const navItems: NavItem[] = [
 
 export function SidebarNav() {
   const pathname = usePathname();
-  const { firestore, user, auth } = useFirebase();
+  const { state, toggleSidebar } = useSidebar();
   const [installPrompt, setInstallPrompt] = useState<any>(null);
 
   useEffect(() => {
@@ -98,19 +101,32 @@ export function SidebarNav() {
   });
 
   return (
-    <Sidebar>
-      <SidebarHeader className="p-4">
-        <Link href="/dashboard/pos" scroll={false} className="flex items-center gap-2">
-            <AppLogo className="w-8 h-8 text-sidebar-primary" />
-            <span className={cn(
-                "text-lg font-semibold text-sidebar-foreground",
-                "group-data-[collapsible=icon]:hidden"
-            )}>
-                POS Mariche
-            </span>
-        </Link>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="p-3 group-data-[collapsible=icon]:p-2">
+        <div className="flex items-center justify-between gap-2">
+          <Link
+            href="/dashboard/pos"
+            scroll={false}
+            className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden"
+          >
+              <BrandLockup size="sm" className="text-sidebar-foreground" />
+          </Link>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={toggleSidebar}
+            title={state === 'collapsed' ? 'Mostrar menú' : 'Ocultar menú'}
+            aria-label={state === 'collapsed' ? 'Mostrar menú' : 'Ocultar menú'}
+            className="h-8 w-8 shrink-0 p-0 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground group-data-[collapsible=icon]:mx-auto"
+          >
+            {state === 'collapsed'
+              ? <PanelLeftOpen className="h-4 w-4" />
+              : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+        </div>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="group-data-[collapsible=icon]:px-2">
         <SidebarMenu>
           {filteredNavItems.map((item) => (
             <SidebarMenuItem key={item.href}>
@@ -144,7 +160,7 @@ export function SidebarNav() {
           )}
         </SidebarMenu>
       </SidebarContent>
-      <SidebarFooter className='mt-auto p-4 space-y-2'>
+      <SidebarFooter className='mt-auto p-3 group-data-[collapsible=icon]:p-2 space-y-2'>
         <Separator className="my-1 bg-sidebar-border/50"/>
         
         {profile?.isPinRequired === true && isSecurityUnlocked && (
@@ -164,10 +180,10 @@ export function SidebarNav() {
 
         <SidebarMenu>
             <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip={{children: 'Mi Perfil'}} isActive={pathname === '/dashboard/settings'}>
+                <SidebarMenuButton asChild tooltip={{children: 'Configuración'}} isActive={pathname === '/dashboard/settings'}>
                     <Link href="/dashboard/settings" scroll={false}>
-                        <User />
-                        <span className="truncate">{profile?.email || user?.email || 'Mi Cuenta'}</span>
+                        <Settings />
+                        <span className="truncate group-data-[collapsible=icon]:hidden">Configuración</span>
                     </Link>
                 </SidebarMenuButton>
             </SidebarMenuItem>

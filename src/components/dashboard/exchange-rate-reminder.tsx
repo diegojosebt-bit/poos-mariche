@@ -1,7 +1,7 @@
 "use client";
 
 import { useCurrency } from "@/hooks/use-currency";
-import { Loader2, TrendingUp, RefreshCw, RotateCcw, Wifi, WifiOff, Download } from "lucide-react";
+import { Loader2, TrendingUp, RefreshCw, RotateCcw, Wifi, WifiOff, Download, LogOut } from "lucide-react";
 import { Button } from "../ui/button";
 import { useState, useEffect } from "react";
 import { useFirebase, setDocumentNonBlocking } from "@/firebase";
@@ -9,11 +9,35 @@ import { doc } from "firebase/firestore";
 import type { AppSettings } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { UserAvatarIcon } from "@/components/icons";
+import { useRouter } from "next/navigation";
+import { signOut } from "firebase/auth";
+import { useDashboardStore } from "@/contexts/dashboard-context";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export function ExchangeRateReminder() {
     const { settings, isLoading, bcvRate, parallelRate } = useCurrency();
-    const { firestore, user } = useFirebase();
+    const { firestore, user, auth } = useFirebase();
+    const { profile } = useDashboardStore();
     const { toast } = useToast();
+    const router = useRouter();
+
+    const handleSignOut = async () => {
+        try {
+            localStorage.removeItem('mm_session_id');
+            sessionStorage.removeItem('mm_security_unlocked');
+            if (auth) await signOut(auth);
+        } finally {
+            router.replace('/');
+        }
+    };
     
     const [isUpdating, setIsUpdating] = useState(false);
     const [isOnline, setIsOnline] = useState(true);
@@ -154,7 +178,48 @@ export function ExchangeRateReminder() {
                         </div>
                     </div>
                 </div>
-                {isUpdating && <div className="text-primary animate-pulse text-xs font-bold flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Actualizando tasa BCV...</div>}
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                    {isUpdating && (
+                        <div className="text-primary animate-pulse text-xs font-bold flex items-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" /> Actualizando tasa BCV...
+                        </div>
+                    )}
+
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="rounded-full !bg-transparent text-slate-900 hover:!bg-transparent hover:!text-slate-900 active:!bg-transparent data-[state=open]:!bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+                                style={{ width: 34, height: 34 }}
+                                title="Cuenta"
+                            >
+                                <UserAvatarIcon style={{ width: 25, height: 25 }} />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-64">
+                            <DropdownMenuLabel className="font-normal">
+                                <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                                    Cuenta
+                                </p>
+                                <p className="mt-1 truncate text-xs font-bold">
+                                    {profile?.email || user?.email || 'Mi cuenta'}
+                                </p>
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                                onSelect={(event) => {
+                                    event.preventDefault();
+                                    void handleSignOut();
+                                }}
+                                className="cursor-pointer text-destructive data-[highlighted]:bg-primary data-[highlighted]:text-white focus:bg-primary focus:text-white"
+                            >
+                                <LogOut className="mr-2 h-4 w-4" />
+                                Cerrar sesión
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
             </div>
         </div>
     );

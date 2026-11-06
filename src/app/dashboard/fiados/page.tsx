@@ -6,6 +6,7 @@ import { useCollection, useDoc, useFirebase, useMemoFirebase, setDocumentNonBloc
 import { collection, doc, query, orderBy, limit, runTransaction, setDoc, increment, serverTimestamp } from "firebase/firestore";
 import { fiadoOverviewWrites, overviewRef, saleStatsWrites, dailyRef, monthlyRef } from '@/lib/firestore/rollups';
 import { invalidateStatsRange } from '@/lib/firestore/stats-range';
+import { TablePaginationBar } from '@/components/table-pagination-bar';
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import { useFeatureFlag } from '@/lib/features';
@@ -363,54 +364,35 @@ function FiadosContent() {
                         </Table>
                     </CardContent>
                     {filteredFiados.length > 0 && (
-                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t bg-slate-50/50 text-xs text-muted-foreground">
-                            <div>
-                                Mostrando <span className="font-bold text-slate-800">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> a <span className="font-bold text-slate-800">{Math.min(currentPage * ITEMS_PER_PAGE, filteredFiados.length)}</span> de <span className="font-bold text-slate-800">{filteredFiados.length}</span> créditos
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 px-2 text-xs font-bold"
-                                    disabled={currentPage === 1}
-                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                                >
-                                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
-                                </Button>
-                                <span className="font-bold text-slate-800 px-2">
-                                    Página {currentPage} de {totalPages}
-                                </span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 px-2 text-xs font-bold"
-                                    disabled={currentPage >= totalPages}
-                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                                >
-                                    Siguiente <ChevronRight className="h-4 w-4 ml-1" />
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                {usePaged && (
-                    <div className="flex items-center justify-center gap-3 pt-3 border-t">
-                        <span className="text-[10px] font-bold uppercase text-muted-foreground">
-                            {fiados?.length || 0} fiados cargados
-                        </span>
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-8 px-2 text-xs font-bold gap-1.5"
-                            onClick={() => { void paged.loadMore(); }}
-                            disabled={!paged.hasMore || paged.isLoadingMore}
-                        >
-                            {paged.isLoadingMore
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                : <PlusCircle className="h-3.5 w-3.5" />}
-                            {paged.hasMore ? 'Cargar 50 más' : 'Historial completo'}
-                        </Button>
-                    </div>
-                )}
+                        <TablePaginationBar
+                                page={currentPage}
+                                totalPages={totalPages}
+                                totalItems={filteredFiados.length}
+                                rangeStart={filteredFiados.length === 0 ? 0 : ((currentPage - 1) * ITEMS_PER_PAGE) + 1}
+                                rangeEnd={Math.min(currentPage * ITEMS_PER_PAGE, filteredFiados.length)}
+                                itemLabel="créditos"
+                                info={usePaged ? `Cargados: ${fiados?.length || 0}` : undefined}
+                                actions={usePaged ? (
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        className="h-8 px-2 text-xs font-bold gap-1.5"
+                                        onClick={() => { void paged.loadMore(); }}
+                                        disabled={!paged.hasMore || paged.isLoadingMore}
+                                    >
+                                        {paged.isLoadingMore
+                                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            : <PlusCircle className="h-3.5 w-3.5" />}
+                                        <span className="hidden sm:inline">{paged.hasMore ? 'Cargar 50 más' : 'Historial completo'}</span>
+                                        <span className="sm:hidden">{paged.hasMore ? '+50' : 'Completo'}</span>
+                                    </Button>
+                                ) : undefined}
+                                onPrevious={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                onNext={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                canPrevious={currentPage > 1}
+                                canNext={currentPage < totalPages}
+                            />
+                        )}
                 </Card>
             </main>
         </>

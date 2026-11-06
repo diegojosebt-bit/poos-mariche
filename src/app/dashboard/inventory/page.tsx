@@ -3,7 +3,7 @@
 import React, { Suspense, useState, useMemo, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
-import { PlusCircle, Trash2, Calculator, Clock, RefreshCw, Loader2 } from "lucide-react";
+import { PlusCircle, Trash2, Calculator, Clock, RefreshCw, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 import { columns } from "@/components/inventory/columns";
 import type { Product } from '@/lib/types';
@@ -291,6 +291,87 @@ function InventoryContent() {
                     globalFilterFn={productFilterFn}
                     onGlobalFilterChange={handleSearchChange}
                     isServerSearching={usePaged && serverSearchFlag && serverSearch.isSearching}
+                    footerBar={(table) => (
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-t bg-muted/20 px-3 py-2">
+                            <div className="justify-self-start">
+                                <AlertDialog open={isSyncConfirmOpen} onOpenChange={setIsSyncConfirmOpen}>
+                                    <AlertDialogTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={isLoading}
+                                            className="h-8 text-xs font-semibold gap-1.5"
+                                        >
+                                            <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
+                                            <span className="hidden sm:inline">Sincronizar catálogo</span>
+                                            <span className="sm:hidden">Sincronizar</span>
+                                        </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>¿Sincronizar el catálogo?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                Se volverán a descargar todos los productos desde Firebase y cada descarga consume lecturas.
+                                                Úsalo solo si sospechas que otro dispositivo cambió el inventario.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => refetchProducts()}>Sincronizar</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
+                            </div>
+
+                            <div className="justify-self-center">
+                                {usePaged ? (
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => paged.loadMore()}
+                                        disabled={paged.isLoadingMore || !paged.hasMore}
+                                        className="h-8 text-xs font-semibold gap-1.5"
+                                    >
+                                        {paged.isLoadingMore
+                                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            : <PlusCircle className="w-3.5 h-3.5" />}
+                                        <span className="hidden sm:inline">{paged.hasMore ? 'Cargar 100 más' : 'Catálogo completo'}</span>
+                                        <span className="sm:hidden">{paged.hasMore ? '+100' : 'Completo'}</span>
+                                    </Button>
+                                ) : (
+                                    <span className="text-[10px] font-black uppercase text-muted-foreground">
+                                        Catálogo completo
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="flex items-center justify-self-end gap-1">
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => table.previousPage()}
+                                    disabled={!table.getCanPreviousPage()}
+                                    aria-label="Página anterior"
+                                    className="h-7 w-7"
+                                >
+                                    <ChevronLeft className="h-3.5 w-3.5" />
+                                </Button>
+                                <span className="min-w-9 text-center text-[10px] font-black uppercase text-muted-foreground">
+                                    {table.getState().pagination.pageIndex + 1}/{Math.max(1, table.getPageCount())}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => table.nextPage()}
+                                    disabled={!table.getCanNextPage()}
+                                    aria-label="Página siguiente"
+                                    className="h-7 w-7"
+                                >
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 >
                     {(table) => (
                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -303,58 +384,6 @@ function InventoryContent() {
                         </div>
                     )}
                 </DataTable>
-
-                <div className="mt-4 p-3 bg-muted/30 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                        <span className="text-muted-foreground font-medium">
-                            {usePaged ? (
-                                <>Productos cargados: <strong className="text-foreground">{products?.length || 0}</strong> ({filteredProducts.length} visibles)</>
-                            ) : (
-                                <>Total en inventario: <strong className="text-foreground">{products?.length || 0}</strong> productos ({filteredProducts.length} visibles)</>
-                            )}
-                        </span>
-                    </div>
-                    {usePaged && (
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => paged.loadMore()}
-                            disabled={paged.isLoadingMore || !paged.hasMore}
-                            className="h-8 text-xs font-semibold gap-1.5"
-                        >
-                            {paged.isLoadingMore
-                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                : <PlusCircle className="w-3.5 h-3.5" />}
-                            {paged.hasMore ? 'Cargar 100 más' : 'Catálogo completo'}
-                        </Button>
-                    )}
-                    <AlertDialog open={isSyncConfirmOpen} onOpenChange={setIsSyncConfirmOpen}>
-                        <AlertDialogTrigger asChild>
-                            <Button 
-                                variant="outline" 
-                                size="sm" 
-                                disabled={isLoading}
-                                className="h-8 text-xs font-semibold gap-1.5"
-                            >
-                                <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
-                                Sincronizar catálogo
-                            </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>¿Sincronizar el catálogo?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    Se volverán a descargar todos los productos desde Firebase y cada descarga consume lecturas.
-                                    Úsalo solo si sospechas que otro dispositivo cambió el inventario.
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => refetchProducts()}>Sincronizar</AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                </div>
 
                 {editingProduct && (
                     <ProductFormDialog 

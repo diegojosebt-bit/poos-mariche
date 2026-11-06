@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
-import { AppLogo } from "./icons";
+import { BrandLockup } from "./icons";
 import { Loader2, Mail, Lock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { doc, setDoc, updateDoc } from "firebase/firestore";
@@ -139,12 +139,19 @@ export function AuthView() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
       <Card className="w-full max-w-md shadow-xl border-t-4 border-primary">
         <CardHeader className="text-center space-y-2">
-          <div className="flex justify-center mb-2">
-            <AppLogo className="w-16 h-16 text-primary" />
+          <div className="flex justify-center mb-3">
+            <BrandLockup
+              size="lg"
+              orientation="vertical"
+              showTagline={isLogin}
+              className="text-foreground"
+            />
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">
-            {isLogin ? "POS Mariche" : "Registro de Negocio"}
-          </CardTitle>
+          {!isLogin && (
+            <CardTitle className="text-xl font-black uppercase tracking-tight">
+              Registro de Negocio
+            </CardTitle>
+          )}
           <CardDescription>
             {isLogin 
               ? "Ingresa tus credenciales para acceder." 

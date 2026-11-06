@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "./ui/skeleton"
+import { TablePaginationBar } from "./table-pagination-bar"
 
 import { Loader2 } from "lucide-react"
 
@@ -42,6 +43,12 @@ interface DataTableProps<TData, TValue> {
   onGlobalFilterChange?: (filterValue: string, filteredCount: number) => void;
   isServerSearching?: boolean;
   searchAddon?: React.ReactNode;
+  footerInfo?: React.ReactNode;
+  footerActions?: React.ReactNode;
+  itemLabel?: string;
+  hideFooter?: boolean;
+  pageSize?: number;
+  footerBar?: (table: Table<TData>) => React.ReactNode;
 }
 
 export function DataTable<TData, TValue>({
@@ -54,7 +61,13 @@ export function DataTable<TData, TValue>({
   meta,
   onGlobalFilterChange,
   isServerSearching = false,
-  searchAddon
+  searchAddon,
+  footerInfo,
+  footerActions,
+  itemLabel = 'registros',
+  hideFooter = false,
+  pageSize = 20,
+  footerBar,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -62,7 +75,7 @@ export function DataTable<TData, TValue>({
   const [globalFilter, setGlobalFilter] = React.useState('')
   const [pagination, setPagination] = React.useState({
     pageIndex: 0,
-    pageSize: 20,
+    pageSize,
   })
 
   const table = useReactTable({
@@ -186,31 +199,31 @@ export function DataTable<TData, TValue>({
             </TableBody>
         </ShadcnTable>
         </div>
-        <div className="flex items-center justify-between">
-            <div className="text-[10px] font-black uppercase text-muted-foreground">
-                Página {table.getState().pagination.pageIndex + 1} de {table.getPageCount()} ({table.getFilteredRowModel().rows.length} total)
-            </div>
-            <div className="flex items-center justify-end space-x-2 py-4">
-                <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
-                className="h-8 text-xs font-bold"
-                >
-                Anterior
-                </Button>
-                <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
-                className="h-8 text-xs font-bold"
-                >
-                Siguiente
-                </Button>
-            </div>
-        </div>
+        {footerBar ? (
+          footerBar(table)
+        ) : !hideFooter ? (
+          <TablePaginationBar
+            page={table.getState().pagination.pageIndex + 1}
+            totalPages={table.getPageCount()}
+            totalItems={table.getFilteredRowModel().rows.length}
+            rangeStart={
+              table.getFilteredRowModel().rows.length === 0
+                ? 0
+                : table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1
+            }
+            rangeEnd={Math.min(
+              (table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize,
+              table.getFilteredRowModel().rows.length,
+            )}
+            itemLabel={itemLabel}
+            info={footerInfo}
+            actions={footerActions}
+            onPrevious={() => table.previousPage()}
+            onNext={() => table.nextPage()}
+            canPrevious={table.getCanPreviousPage()}
+            canNext={table.getCanNextPage()}
+          />
+        ) : null}
     </div>
   )
 }

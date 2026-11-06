@@ -8,6 +8,7 @@ import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import type { QueryFilter } from '@/lib/firestore/cache-policy';
 import { useDailyStatsRange, invalidateStatsRange } from '@/lib/firestore/stats-range';
+import { TablePaginationBar } from '@/components/table-pagination-bar';
 import { useFeatureFlag } from '@/lib/features';
 import { useDashboardStore } from '@/contexts/dashboard-context';
 import type { Expense, PaymentMethod, ExpenseCategory } from "@/lib/types";
@@ -354,54 +355,35 @@ function ExpensesContent() {
                             </TableBody>
                         </Table>
                     </CardContent>
-                    {filteredExpenses.length > 0 && (
-                        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t bg-slate-50/50 text-xs text-muted-foreground">
-                            <div>
-                                Mostrando <span className="font-bold text-slate-800">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> a <span className="font-bold text-slate-800">{Math.min(currentPage * ITEMS_PER_PAGE, filteredExpenses.length)}</span> de <span className="font-bold text-slate-800">{filteredExpenses.length}</span> transacciones
-                            </div>
-                            <div className="flex items-center gap-2">
+                    {(filteredExpenses.length > 0 || usePaged) && (
+                        <TablePaginationBar
+                            page={currentPage}
+                            totalPages={totalPages}
+                            totalItems={filteredExpenses.length}
+                            rangeStart={filteredExpenses.length === 0 ? 0 : ((currentPage - 1) * ITEMS_PER_PAGE) + 1}
+                            rangeEnd={Math.min(currentPage * ITEMS_PER_PAGE, filteredExpenses.length)}
+                            itemLabel="gastos"
+                            info={usePaged ? `Cargados: ${expenses?.length || 0}` : undefined}
+                            actions={usePaged ? (
                                 <Button
-                                    variant="outline"
+                                    variant="secondary"
                                     size="sm"
-                                    className="h-8 px-2 text-xs font-bold"
-                                    disabled={currentPage === 1}
-                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                    className="h-8 px-2 text-xs font-bold gap-1.5"
+                                    onClick={() => { void paged.loadMore(); }}
+                                    disabled={!paged.hasMore || paged.isLoadingMore}
                                 >
-                                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+                                    {paged.isLoadingMore
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        : <PlusCircle className="h-3.5 w-3.5" />}
+                                    <span className="hidden sm:inline">{paged.hasMore ? 'Cargar 50 más' : 'Rango completo'}</span>
+                                    <span className="sm:hidden">{paged.hasMore ? '+50' : 'Completo'}</span>
                                 </Button>
-                                <span className="font-bold text-slate-800 px-2">
-                                    Página {currentPage} de {totalPages}
-                                </span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 px-2 text-xs font-bold"
-                                    disabled={currentPage >= totalPages}
-                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                                >
-                                    Siguiente <ChevronRight className="h-4 w-4 ml-1" />
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                    {usePaged && (
-                        <div className="flex items-center justify-center gap-3 p-4 border-t bg-slate-50/50">
-                            <span className="text-[10px] font-bold uppercase text-muted-foreground">
-                                {expenses?.length || 0} gastos cargados
-                            </span>
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                className="h-8 px-2 text-xs font-bold gap-1.5"
-                                onClick={() => { void paged.loadMore(); }}
-                                disabled={!paged.hasMore || paged.isLoadingMore}
-                            >
-                                {paged.isLoadingMore
-                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    : <PlusCircle className="h-3.5 w-3.5" />}
-                                {paged.hasMore ? 'Cargar 50 más' : 'Rango completo'}
-                            </Button>
-                        </div>
+                            ) : undefined}
+                            onPrevious={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                            onNext={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                            canPrevious={currentPage > 1}
+                            canNext={currentPage < totalPages}
+                        />
                     )}
                 </Card>
             </main>

@@ -77,7 +77,7 @@ export const useCurrency = () => {
             const priceWithProfitInBs = costInBs * (1 + marginToUse / 100);
             const finalPriceInBcvUsd = priceWithProfitInBs / (bcvRate || 1);
             
-            return isFinite(finalPriceInBcvUsd) ? parseFloat(finalPriceInBcvUsd.toFixed(2)) : 0;
+            return isFinite(finalPriceInBcvUsd) ? parseFloat(finalPriceInBcvUsd.toFixed(6)) : 0;
         } catch (e) {
             return 0;
         }
@@ -104,7 +104,7 @@ export const useCurrency = () => {
                 basePrice = basePrice * 1.16;
             }
             
-            return isFinite(basePrice) ? parseFloat((basePrice || 0).toFixed(2)) : 0;
+            return isFinite(basePrice) ? parseFloat((basePrice || 0).toFixed(6)) : 0;
         } catch (e) {
             return 0;
         }

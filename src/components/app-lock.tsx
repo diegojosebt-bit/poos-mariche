@@ -6,7 +6,7 @@ import { useAppLock } from '@/contexts/app-lock-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
-import { AppLogo } from './icons';
+import { BrandLockup } from './icons';
 import { ShieldCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -43,7 +43,7 @@ export function AppLock() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <AppLogo className="w-16 h-16 text-primary" />
+            <BrandLockup size="md" orientation="vertical" className="text-foreground" />
           </div>
           <CardTitle className="text-2xl">Acceso Protegido</CardTitle>
           <CardDescription>

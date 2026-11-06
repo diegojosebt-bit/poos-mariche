@@ -43,8 +43,8 @@ function LicenseExpiredScreen({ profile }: { profile: UserProfile | null }) {
 
     const message = encodeURIComponent(
         isNewAccount 
-        ? `Hola, acabo de registrar mi negocio (${profile?.email}) en POS Mariche. Deseo activar mi periodo de prueba de 7 días.`
-        : `Hola, mi cuenta de POS Mariche (${profile?.email}) ha sido suspendida o la licencia ha expirado. Deseo gestionar la renovación de mi acceso.`
+        ? `Hola, acabo de registrar mi negocio (${profile?.email}) en MARICHE POS. Deseo activar mi periodo de prueba de 7 días.`
+        : `Hola, mi cuenta de MARICHE POS (${profile?.email}) ha sido suspendida o la licencia ha expirado. Deseo gestionar la renovación de mi acceso.`
     );
     
     const handleSignOut = () => {
@@ -67,7 +67,7 @@ function LicenseExpiredScreen({ profile }: { profile: UserProfile | null }) {
                     </CardTitle>
                     <CardDescription className="font-bold text-slate-500">
                         {isNewAccount 
-                            ? "¡Bienvenido a POS Mariche! Tu cuenta está siendo verificada." 
+                            ? "¡Bienvenido a MARICHE POS! Tu cuenta está siendo verificada." 
                             : "Tu acceso al sistema ha sido revocado temporalmente."}
                     </CardDescription>
                 </CardHeader>

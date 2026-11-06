@@ -41,7 +41,7 @@ export function ReceiptView({ sale, currency, businessName, profile, repairData 
     return (
          <div className="receipt-content">
             <div className="text-center mb-2">
-                <h3 className="business-name bold-header" style={{ fontSize: '12pt' }}>{businessName || 'POS MARICHE'}</h3>
+                <h3 className="business-name bold-header" style={{ fontSize: '12pt' }}>{businessName || 'MARICHE POS'}</h3>
                 {showInfo && profile?.businessRIF && (
                     <p className="meta-info font-bold">RIF: {profile.businessRIF.toUpperCase()}</p>
                 )}

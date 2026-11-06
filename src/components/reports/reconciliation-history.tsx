@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Minus, Printer, CalendarIcon, X as ClearIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "../ui/button";
 import { handlePrintReconciliation } from "./reconciliation-ticket";
+import { TablePaginationBar } from "../table-pagination-bar";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useMemo, useEffect } from "react";
 import type { DateRange } from "react-day-picker";
@@ -180,13 +181,18 @@ export function ReconciliationHistory({ reconciliations, isLoading }: Reconcilia
                         ))}
                     </Accordion>
                     {totalPages > 1 && (
-                        <div className="flex items-center justify-between py-4 border-t mt-4">
-                            <span className="text-[10px] font-black uppercase text-muted-foreground">Página {currentPage} de {totalPages}</span>
-                            <div className="flex gap-2">
-                                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="h-8 text-[10px] font-black uppercase"><ChevronLeft className="w-3 h-3 mr-1" /> Anterior</Button>
-                                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="h-8 text-[10px] font-black uppercase">Siguiente <ChevronRight className="w-3 h-3 ml-1" /></Button>
-                            </div>
-                        </div>
+                        <TablePaginationBar
+                            page={currentPage}
+                            totalPages={totalPages}
+                            totalItems={filteredReconciliations.length}
+                            rangeStart={filteredReconciliations.length === 0 ? 0 : ((currentPage - 1) * ITEMS_PER_PAGE) + 1}
+                            rangeEnd={Math.min(currentPage * ITEMS_PER_PAGE, filteredReconciliations.length)}
+                            itemLabel="cierres"
+                            onPrevious={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            onNext={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                            canPrevious={currentPage > 1}
+                            canNext={currentPage < totalPages}
+                        />
                     )}
                 </div>
             )}

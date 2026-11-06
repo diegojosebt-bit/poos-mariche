@@ -361,7 +361,7 @@ function POSContent() {
         <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden">
              <header className="bg-white flex h-14 items-center gap-4 border-b px-4 sm:h-16 sm:px-6">
                 <div className="flex items-center gap-2">
-                    <SidebarTrigger />
+                    <SidebarTrigger className="md:hidden" />
                     <h1 className="text-lg font-semibold truncate max-w-[120px] sm:max-w-none">Punto de Venta</h1>
                 </div>
                 <div className="ml-auto flex items-center gap-1 sm:gap-2">

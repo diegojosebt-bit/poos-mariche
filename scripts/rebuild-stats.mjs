@@ -125,9 +125,15 @@ async function rebuildUser(db, userRef, fromIso, counters) {
         0,
       );
 
+      const itemsCostSum = cost;
+
       if (cost === 0 && Number(sale.costPrice || 0) > 0) {
         cost = Number(sale.costPrice);
       }
+
+      const fallbackUnitCost = itemsCostSum === 0 && Number(sale.costPrice || 0) > 0 && itemsNominal > 0
+        ? Number(sale.costPrice) / itemsNominal
+        : 0;
 
       entry.salesUSD += revenue;
       entry.salesCount += 1;
@@ -146,13 +152,18 @@ async function rebuildUser(db, userRef, fromIso, counters) {
       }
 
       for (const item of items) {
-        if (item.isCustom || !item.productId) continue;
-        const key = safeFieldKey(item.productId);
+        // Los abonos de fiado suman al total (caja) pero NO son un artículo vendido.
+        if (sale.fiadoId || !item.productId) continue;
+        // Venta rápida: agrupar por nombre, no por el id temporal.
+        const key = item.isCustom
+          ? safeFieldKey(`custom_${item.name || 'rapida'}`)
+          : safeFieldKey(item.productId);
         const current = entry.items[key] ?? { n: item.name, q: 0, rev: 0, cost: 0 };
         current.n = item.name;
         current.q += Number(item.quantity || 0);
         current.rev += Number(item.price || 0) * Number(item.quantity || 0) * collectionRatio;
-        current.cost += Number(item.costPrice ?? 0) * Number(item.quantity || 0);
+        const unitCost = Number(item.costPrice ?? item.customCostPrice ?? 0) || fallbackUnitCost * Number(item.price || 0);
+        current.cost += unitCost * Number(item.quantity || 0);
         entry.items[key] = current;
       }
 
@@ -292,6 +303,13 @@ async function main() {
   const db = getFirestore();
 
   const fromDate = FROM_ARG ? new Date(`${FROM_ARG}T00:00:00`) : startOfPreviousMonth();
+
+  // Un rebuild parcial del mes sobrescribiría stats_monthly con datos incompletos.
+  if (FROM_ARG && fromDate.getDate() !== 1) {
+    console.warn(`[rebuild] --from=${FROM_ARG} no es día 1; se normaliza a ${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}-01`);
+    fromDate.setDate(1);
+  }
+
   if (Number.isNaN(fromDate.getTime())) {
     throw new Error('--from inválido. Usa YYYY-MM-DD (idealmente día 1).');
   }

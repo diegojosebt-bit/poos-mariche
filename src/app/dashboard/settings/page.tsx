@@ -11,13 +11,11 @@ import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
-import { useFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, useMemoFirebase } from "@/firebase";
-import { useDashboardStore } from "@/contexts/dashboard-context";
+import { useFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, useMemoFirebase } from "@/firebase";import { useDashboardStore } from "@/contexts/dashboard-context";
 import { doc, collection, getDocs, query, orderBy, startAfter, limit, documentId } from "firebase/firestore";
 import { useEffect, useState, useMemo } from "react";
 import type { AppSettings, UserProfile, Product, UserModule } from "@/lib/types";
 import { Switch } from "@/components/ui/switch";
-import { signOut } from "firebase/auth";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import { Textarea } from "@/components/ui/textarea";
@@ -78,7 +76,7 @@ export default function SettingsPage() {
 
 function SettingsContent() {
     const { toast } = useToast();
-    const { firestore, auth, user } = useFirebase();
+    const { firestore, user } = useFirebase();
     const [isUpdatingPin, setIsUpdatingPin] = useState(false);
     const [isSavingSettings, setIsSavingSettings] = useState(false);
     const [isFetchingOfficialRate, setIsFetchingOfficialRate] = useState(false);
@@ -800,10 +798,6 @@ function SettingsContent() {
                         <Button onClick={handleExportSettings} variant="outline" className="w-full"><DownloadCloud className="mr-2 h-4 w-4" /> Exportar Configuraciones</Button>
                     </div>
                 </Card>
-
-                <div className="flex flex-col items-center gap-4 pt-8">
-                    <Button variant="destructive" onClick={() => signOut(auth)} size="lg" className="uppercase font-bold w-full max-w-xs shadow-xl"><LogOut className="mr-2 h-5 w-5" /> Cerrar Sesión</Button>
-                </div>
             </main>
 
             <Dialog

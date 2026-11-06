@@ -4,20 +4,20 @@ import { cn } from '@/lib/utils';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'POS MARICHE - Gestión de Negocio',
+  title: 'MARICHE POS - Gestión de Negocio',
   description: 'Sistema de gestión integral para ventas, inventario, caja, reparaciones y reportes de transacciones.',
   manifest: '/manifest.json',
   icons: {
     icon: '/favicon.ico',
-    apple: '/icon.png',
+    apple: '/apple-icon.png',
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'POS MARICHE',
+    title: 'MARICHE POS',
   },
   openGraph: {
-    title: 'POS MARICHE - Gestión de Negocio',
+    title: 'MARICHE POS - Gestión de Negocio',
     description: 'Sistema de gestión integral para ventas, inventario, caja, reparaciones y reportes de transacciones.',
   },
 };

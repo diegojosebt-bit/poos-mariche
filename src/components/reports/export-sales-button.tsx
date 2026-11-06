@@ -328,7 +328,7 @@ export function ExportSalesButton({ products, repairJobs, fiados }: ExportSalesB
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Ventas_PoosMariche");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Ventas_MarichePOS");
     
     // Ajustar anchos de columna
     if (dataToExport.length > 0) {

@@ -172,7 +172,7 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
   const suggestedRetailPrice = useMemo(() => {
     let retail = getDynamicPrice(costPrice, hasCustomMargin ? Number(customMarginValue || 0) : profitMargin);
     if (hasIVA) retail = retail * 1.16;
-    return parseFloat(retail.toFixed(2));
+    return parseFloat(retail.toFixed(6));
   }, [hasCustomMargin, customMarginValue, costPrice, getDynamicPrice, profitMargin, hasIVA]);
 
   const suggestedPromoPrice = useMemo(() => {
