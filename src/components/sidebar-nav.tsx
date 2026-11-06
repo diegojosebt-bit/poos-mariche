@@ -71,6 +71,20 @@ export function SidebarNav() {
   const router = useRouter();
   const { toast } = useToast();
 
+  // Precarga los payloads de las rutas mientras hay internet. Así, al pasar
+  // offline, cambiar de módulo no espera una petición RSC de Next.
+  useEffect(() => {
+    const prefetchRoutes = () => {
+      if (typeof navigator === 'undefined' || !navigator.onLine) return;
+      navItems.forEach((item) => router.prefetch(item.href));
+      router.prefetch('/dashboard/settings');
+    };
+
+    prefetchRoutes();
+    window.addEventListener('online', prefetchRoutes);
+    return () => window.removeEventListener('online', prefetchRoutes);
+  }, [router]);
+
   const isAdmin = !!profile?.isAdmin;
   
   const handleLockManager = () => {
