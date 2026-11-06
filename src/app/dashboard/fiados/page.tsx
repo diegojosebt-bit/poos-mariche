@@ -6,6 +6,7 @@ import { useCollection, useDoc, useFirebase, useMemoFirebase, setDocumentNonBloc
 import { collection, doc, query, orderBy, limit, runTransaction, setDoc, increment, serverTimestamp } from "firebase/firestore";
 import { fiadoOverviewWrites, overviewRef, saleStatsWrites, dailyRef, monthlyRef } from '@/lib/firestore/rollups';
 import { invalidateStatsRange } from '@/lib/firestore/stats-range';
+import { ensureOnline } from '@/lib/offline-guard';
 import { TablePaginationBar } from '@/components/table-pagination-bar';
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
@@ -534,6 +535,7 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!firestore || !user || loading) return;
+        if (!ensureOnline(toast, 'Crear un fiado')) return;
 
         setLoading(true);
         try {
@@ -738,6 +740,7 @@ function AddItemsToFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: 
 
     const handleUpdate = async () => {
         if (!firestore || !user || loading || selectedItems.length === 0) return;
+        if (!ensureOnline(toast, 'Agregar productos al fiado')) return;
 
         setLoading(true);
         try {
@@ -931,6 +934,10 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
 
         setLoading(true);
         let saleDataForCache: Sale | null = null;
+        if (!ensureOnline(toast, 'Registrar un abono')) {
+            setLoading(false);
+            return;
+        }
         try {
             const updatedFiado: any = {};
             await runTransaction(firestore, async (transaction) => {

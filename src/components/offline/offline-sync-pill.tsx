@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Wifi, WifiOff, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { ensureOnline } from '@/lib/offline-guard';
 
 export function OfflineSyncPill() {
   const { firestore, user } = useFirebase();
@@ -48,6 +49,7 @@ export function OfflineSyncPill() {
     
     const count = getOfflineQueue(user.uid).length;
     if (count === 0) return;
+    if (!ensureOnline(toast, 'Sincronizar ventas pendientes')) return;
 
     setIsSyncing(true);
     try {

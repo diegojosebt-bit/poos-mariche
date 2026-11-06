@@ -9,6 +9,7 @@ import { Label } from "./ui/label";
 import { BrandLockup } from "./icons";
 import { Loader2, Mail, Lock, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { ensureOnline } from "@/lib/offline-guard";
 import { doc, setDoc, updateDoc } from "firebase/firestore";
 
 const SESSION_KEY = 'mm_session_id';
@@ -40,6 +41,7 @@ export function AuthView() {
     e.preventDefault();
     if (!auth || !firestore) return;
     if (lockoutTimer > 0) return;
+    if (!ensureOnline(toast, 'Iniciar sesión o registrarse')) return;
 
     // 1. Strict Email Syntax Validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

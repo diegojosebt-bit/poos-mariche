@@ -21,6 +21,7 @@ import { doc, runTransaction, getDoc, type DocumentSnapshot } from "firebase/fir
 import { saleStatsWrites } from '@/lib/firestore/rollups';
 import { queryCache } from '@/lib/firestore/query-cache';
 import { invalidateStatsRange } from '@/lib/firestore/stats-range';
+import { ensureOnline } from '@/lib/offline-guard';
 import { Badge } from "../ui/badge";
 import { Textarea } from "../ui/textarea";
 import { Label } from "../ui/label";
@@ -82,6 +83,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
     
     const handleRefund = async () => {
         if (!firestore || !user || !sale.id || !refundReason.trim() || !refundMethod || isProcessing) return;
+        if (!ensureOnline(toast, 'Procesar un reembolso')) return;
         
         const refundedAt = new Date().toISOString();
         setIsProcessing(true);

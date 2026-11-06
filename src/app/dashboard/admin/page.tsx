@@ -39,6 +39,7 @@ import { Edit, Megaphone, Save, Trash2, Loader2, Users, LayoutGrid, ShieldOff, K
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { SecurityGate } from "@/components/security-gate";
+import { ensureOnline } from "@/lib/offline-guard";
 import { normalizeAnnouncements, newAnnouncement, type AnnouncementItem, type AnnouncementType } from "@/lib/announcements";
 
 const ALL_MODULES: { id: UserModule, label: string }[] = [
@@ -456,6 +457,7 @@ function AdminContent() {
 
     const handleSendPasswordReset = async (email: string) => {
         if (!auth) return;
+        if (!ensureOnline(toast, 'Enviar enlace de recuperación')) return;
         try {
             await sendResetEmail(auth, email);
             toast({ title: "Enlace enviado a " + email });

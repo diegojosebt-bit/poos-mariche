@@ -1,6 +1,7 @@
 "use client";
 
 import { cleanObject } from "@/lib/json-guard";
+import { ensureOnline } from "@/lib/offline-guard";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -397,6 +398,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!firestore || !user || isSubmitting) return;
+    if (!ensureOnline(toast, 'Guardar reparación')) return;
 
     const remainingDebt = Math.max(0, estimatedTotal - currentPaid);
     const hasPendingDebt = remainingDebt > 0.009 && !repairJob?.isPaid;

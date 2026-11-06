@@ -6,33 +6,36 @@ import { FirebaseClientProvider, useFirebase } from '@/firebase';
 import { AuthView } from '@/components/auth-view';
 import { Toaster } from '@/components/ui/toaster';
 import { ReadMeterPill } from '@/components/debug/read-meter-pill';
+import { SplashScreen } from '@/components/splash-screen';
 
 function AppContent({ children }: { children: React.ReactNode }) {
   const { user, isUserLoading } = useFirebase();
   const [mounted, setMounted] = useState(false);
+  const [minSplashDone, setMinSplashDone] = useState(false);
+  const [hideSplash, setHideSplash] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    const reduced = typeof window !== 'undefined'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timer = setTimeout(() => setMinSplashDone(true), reduced ? 450 : 2300);
+    return () => clearTimeout(timer);
   }, []);
 
-  if (!mounted || isUserLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
-          <p className="text-sm text-muted-foreground animate-pulse font-medium uppercase tracking-widest">
-            Sincronizando...
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const appReady = mounted && !isUserLoading;
 
-  if (!user) {
-    return <AuthView />;
-  }
+  useEffect(() => {
+    if (!appReady || !minSplashDone) return;
+    const timer = setTimeout(() => setHideSplash(true), 400);
+    return () => clearTimeout(timer);
+  }, [appReady, minSplashDone]);
 
-  return <>{children}</>;
+  return (
+    <>
+      {appReady ? (user ? <>{children}</> : <AuthView />) : null}
+      {!hideSplash && <SplashScreen exiting={appReady && minSplashDone} />}
+    </>
+  );
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import { Textarea } from "@/components/ui/textarea";
 import { SecurityGate } from "@/components/security-gate";
+import { ensureOnline } from "@/lib/offline-guard";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -307,6 +308,7 @@ function SettingsContent() {
 
     const handleExportInventory = async () => {
         if (!firestore || !user) return;
+        if (!ensureOnline(toast, 'Exportar inventario')) return;
         try {
             const confirmed = window.confirm(
                 'Se leerán todos los productos del inventario (puede consumir lecturas). ¿Continuar?',

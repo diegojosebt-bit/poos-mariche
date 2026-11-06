@@ -85,6 +85,13 @@ export function useServerSearch<T>(opts: ServerSearchOptions<T>) {
       return;
     }
 
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setItems([]);
+      setHasSearched(false);
+      setIsSearching(false);
+      return;
+    }
+
     const cached = queryCache.get<T>(key);
     if (cached) {
       setItems(cached.items);

@@ -28,6 +28,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
+import { ensureOnline } from '@/lib/offline-guard';
 import { PrintLabelsButton } from '@/components/inventory/print-labels-button';
 import { PriceCalculatorDialog } from '@/components/tools/price-calculator-dialog';
 import { ProductFormDialog } from '@/components/inventory/product-form-dialog';
@@ -117,6 +118,7 @@ function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
 
 function InventoryContent() {
     const { firestore, user } = useFirebase();
+    const { toast } = useToast();
     
     const { profile } = useDashboardStore();
     const uid = user?.uid ?? '';
@@ -317,7 +319,10 @@ function InventoryContent() {
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                            <AlertDialogAction onClick={() => refetchProducts()}>Sincronizar</AlertDialogAction>
+                                            <AlertDialogAction onClick={() => {
+                                                if (!ensureOnline(toast, 'Sincronizar catálogo')) return;
+                                                refetchProducts();
+                                            }}>Sincronizar</AlertDialogAction>
                                         </AlertDialogFooter>
                                     </AlertDialogContent>
                                 </AlertDialog>

@@ -9,10 +9,11 @@ import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, Lock, LogOut, MessageCircle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Lock, LogOut, MessageCircle } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { isAfter, parseISO, differenceInMinutes } from 'date-fns';
 import { GlobalAnnouncement } from '@/components/dashboard/global-announcement';
+import { AppLogo } from '@/components/icons';
 import { SecurityUnlockedPill } from '@/components/security/security-unlocked-pill';
 import { RepairDraftPill } from '@/components/repairs/repair-draft-pill';
 import { OfflineSyncPill } from '@/components/offline/offline-sync-pill';
@@ -159,10 +160,7 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
     if (isProfileLoading || isSessionValidating || isSettingsLoading) {
         return (
             <div className="flex h-screen items-center justify-center bg-slate-50">
-                <div className="flex flex-col items-center gap-4">
-                    <Loader2 className="h-12 w-12 animate-spin text-primary opacity-20" />
-                    <p className="text-[10px] font-black uppercase tracking-widest text-primary animate-pulse">Sincronizando Sistema...</p>
-                </div>
+                <AppLogo className="h-16 w-16 animate-pulse opacity-80" />
             </div>
         );
     }

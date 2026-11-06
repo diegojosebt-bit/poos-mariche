@@ -16,6 +16,7 @@ import { es } from "date-fns/locale";
 import * as XLSX from "xlsx";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/use-currency";
+import { ensureOnline } from "@/lib/offline-guard";
 import { useFirebase } from "@/firebase";
 import { collection, getCountFromServer, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
 import { countServerReads } from "@/lib/firestore/read-meter";
@@ -50,6 +51,7 @@ export function ExportSalesButton({ products, repairJobs, fiados }: ExportSalesB
       });
       return;
     }
+    if (!ensureOnline(toast, 'Exportar ventas')) return;
     
     const from = startOfDay(date.from);
     const to = date.to ? endOfDay(date.to) : endOfDay(date.from);

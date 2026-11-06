@@ -41,6 +41,7 @@ import { useRouter } from "next/navigation"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog"
 import { useDashboardStore } from "@/contexts/dashboard-context"
 import { queryCache } from "@/lib/firestore/query-cache"
+import { ensureOnline } from "@/lib/offline-guard"
 
 const repairStatuses: RepairStatus[] = ['Pendiente', 'Pagado', 'Completado', 'Garantía'];
 
@@ -226,6 +227,10 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
         }
 
         setIsDelivering(true);
+        if (!ensureOnline(toast, 'Entregar equipo')) {
+            setIsDelivering(false);
+            return;
+        }
         try {
             await runTransaction(firestore, async (transaction) => {
                 const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', repairJob.id!);
@@ -280,6 +285,7 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
 
     const handleDelete = async () => {
         if (!firestore || !repairJob.id || !user) return;
+        if (!ensureOnline(toast, 'Eliminar reparación')) return;
         const jobId = repairJob.id;
         
         try {
@@ -515,6 +521,10 @@ const StatusCell = ({ repairJob, table }: { repairJob: RepairJob, table: any }) 
         }
         
         setIsUpdating(true);
+        if (!ensureOnline(toast, 'Actualizar estado de reparación')) {
+            setIsUpdating(false);
+            return;
+        }
         try {
             await runTransaction(firestore, async (transaction) => {
                 const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', repairJob.id!);

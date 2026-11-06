@@ -21,6 +21,7 @@ import { FileSpreadsheet, FileDown, Calendar, Percent, Loader2, Sparkles, Filter
 import type { RepairJob } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useCurrency } from "@/hooks/use-currency";
+import { ensureOnline } from "@/lib/offline-guard";
 import { useToast } from "@/hooks/use-toast";
 import { useFirebase } from "@/firebase";
 import { collection, getDocs, query, orderBy, where, startAfter, limit } from "firebase/firestore";
@@ -223,6 +224,7 @@ export function ExportRepairsDialog({ repairs: initialRepairs }: ExportRepairsDi
 
   // Generador del archivo Excel
   const handleExport = () => {
+    if (!ensureOnline(toast, 'Exportar reparaciones')) return;
     if (filteredData.length === 0) {
       toast({
         variant: "destructive",
