@@ -46,7 +46,7 @@ export function ExchangeRateReminder() {
     useEffect(() => {
         setIsOnline(navigator.onLine);
         const handleOnline = () => { setIsOnline(true); toast({ title: "Conexión Restaurada" }); };
-        const handleOffline = () => { setIsOnline(false); toast({ title: "Sin Conexión", variant: "destructive" }); };
+        const handleOffline = () => { setIsOnline(false); };
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
 

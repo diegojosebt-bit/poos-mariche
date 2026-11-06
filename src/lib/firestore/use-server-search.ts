@@ -7,6 +7,7 @@ import { buildQueryKey, serializeValue, type QueryFilter } from './cache-policy'
 import { queryCache, type WithId } from './query-cache';
 import { countServerReads } from './read-meter';
 import { lastTokenOf, normalizeText } from '@/lib/search-index';
+import { withTimeout } from './with-timeout';
 
 const MIN_CHARS = 3;
 const DEBOUNCE_MS = 350;
@@ -120,7 +121,7 @@ export function useServerSearch<T>(opts: ServerSearchOptions<T>) {
           limit(pageSize),
         );
 
-        const snapshot = await getDocs(q);
+        const snapshot = await withTimeout(getDocs(q), 2500);
         countServerReads(Math.max(1, snapshot.size), `${opts.collectionName}:search`);
 
         if (cancelled || myGeneration !== generation.current) return;

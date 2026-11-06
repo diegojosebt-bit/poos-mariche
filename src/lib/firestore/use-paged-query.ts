@@ -15,6 +15,7 @@ import {
   type QueryConstraint,
 } from 'firebase/firestore';
 import { useFirebase } from '@/firebase/provider';
+import { withTimeout } from './with-timeout';
 import {
   buildQueryKey,
   getLastSync,
@@ -180,7 +181,7 @@ export function usePagedQuery<T>(opts: PagedQueryOptions<T>) {
 
         if (mustHitServer) {
           try {
-            const snapshot = await getDocs(q);
+            const snapshot = await withTimeout(getDocs(q), 2500);
             countServerReads(Math.max(1, snapshot.size), optsRef.current.collectionName);
 
             items = snapshot.docs.map((doc) => mapDoc(doc.data(), doc.id));
@@ -238,7 +239,7 @@ export function usePagedQuery<T>(opts: PagedQueryOptions<T>) {
       const q = makeQuery(current.cursor);
       if (!q) return;
 
-      const snapshot = await getDocs(q);
+      const snapshot = await withTimeout(getDocs(q), 2500);
       countServerReads(Math.max(1, snapshot.size), optsRef.current.collectionName);
 
       const incoming = snapshot.docs

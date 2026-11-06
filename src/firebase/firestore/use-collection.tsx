@@ -14,6 +14,7 @@ import { useDashboardStore } from '@/contexts/dashboard-context';
 import { useFirebase } from '@/firebase';
 import { serializeValue } from '@/lib/firestore/cache-policy';
 import { countCacheHits, countServerReads } from '@/lib/firestore/read-meter';
+import { withTimeout } from '@/lib/firestore/with-timeout';
 
 export type WithId<T> = T & { id: string };
 
@@ -181,8 +182,8 @@ export function useCollection<T = any>(
       // NIVEL 3: Servidor (Solo si no estaba en caché o si se fuerza refetch)
       try {
         const snapshot = forceServer 
-          ? await getDocsFromServer(memoizedTargetRefOrQuery) 
-          : await getDocs(memoizedTargetRefOrQuery);
+          ? await withTimeout(getDocsFromServer(memoizedTargetRefOrQuery), 2500)
+          : await withTimeout(getDocs(memoizedTargetRefOrQuery), 2500);
 
         // Firestore factura 1 lectura por documento devuelto; una consulta
         // vacía cuesta 1. Este contador es solo para diagnóstico.
