@@ -43,6 +43,21 @@ const EMPTY_AGGREGATE: DayStats = {
 // Caché corta para que cambiar de pestaña o re-render no repita lecturas.
 const RANGE_TTL_MS = 60_000;
 const rangeCache = new Map<string, { at: number; data: StatsAggregate }>();
+const rangeListeners = new Set<() => void>();
+
+/** Invalida el rango cacheado tras una venta/reembolso/gasto/abono. */
+export function invalidateStatsRange(uid?: string) {
+  if (!uid) {
+    rangeCache.clear();
+  } else {
+    const prefix = `${uid}|`;
+    for (const key of Array.from(rangeCache.keys())) {
+      if (key.startsWith(prefix)) rangeCache.delete(key);
+    }
+  }
+  // Avisa a los hooks montados para que vuelvan a leer (1 lectura por día).
+  rangeListeners.forEach((listener) => listener());
+}
 
 function aggregateDocs(
   docs: Array<{ id: string; data: () => Record<string, any> }>,
@@ -93,6 +108,15 @@ export function useDailyStatsRange(from?: Date, to?: Date) {
   const { firestore, user } = useFirebase();
   const [data, setData] = useState<StatsAggregate | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    const listener = () => setRevision((value) => value + 1);
+    rangeListeners.add(listener);
+    return () => {
+      rangeListeners.delete(listener);
+    };
+  }, []);
 
   const fromDay = from ? dayKey(from) : '';
   const toDay = to ? dayKey(to) : fromDay;
@@ -144,7 +168,7 @@ export function useDailyStatsRange(from?: Date, to?: Date) {
     return () => {
       cancelled = true;
     };
-  }, [firestore, user, fromDay, toDay, key]);
+  }, [firestore, user, fromDay, toDay, key, revision]);
 
   return {
     stats: data,

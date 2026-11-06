@@ -18,6 +18,8 @@ import { useFirebase } from "@/firebase";
 import { useDashboardStore } from "@/contexts/dashboard-context";
 import { doc, runTransaction, getDoc, type DocumentSnapshot } from "firebase/firestore";
 import { saleStatsWrites } from '@/lib/firestore/rollups';
+import { queryCache } from '@/lib/firestore/query-cache';
+import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { Badge } from "../ui/badge";
 import { Textarea } from "../ui/textarea";
 import { Label } from "../ui/label";
@@ -69,6 +71,7 @@ const ITEMS_PER_PAGE = 20;
 
 const RefundButton = ({ sale }: { sale: Sale }) => {
     const { firestore, user } = useFirebase();
+    const { updateCachedItem } = useDashboardStore();
     const { toast } = useToast();
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [refundReason, setRefundReason] = useState("");
@@ -79,6 +82,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
     const handleRefund = async () => {
         if (!firestore || !user || !sale.id || !refundReason.trim() || !refundMethod || isProcessing) return;
         
+        const refundedAt = new Date().toISOString();
         setIsProcessing(true);
         try {
             await runTransaction(firestore, async (transaction) => {
@@ -179,7 +183,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                 const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', sale.id!);
                 transaction.update(saleRef, { 
                     status: 'refunded', 
-                    refundedAt: new Date().toISOString(), 
+                    refundedAt, 
                     refundReason,
                     refundPaymentMethod: refundMethod 
                 });
@@ -201,6 +205,16 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     console.warn('[reembolso] No se pudieron preparar los agregados:', statsError);
                 }
             });
+
+            const refundPatch = {
+                status: 'refunded' as const,
+                refundedAt,
+                refundReason,
+                refundPaymentMethod: refundMethod,
+            };
+            updateCachedItem(sale.id!, refundPatch);
+            queryCache.patchItem(user.uid, 'sale_transactions', sale.id!, refundPatch);
+            invalidateStatsRange(user.uid);
 
             toast({ title: "Reembolso Procesado" });
         } catch (error: any) {

@@ -86,8 +86,8 @@ export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
     updatedAt: serverTimestamp(),
   };
 
-  const monthly: Record<string, any> = { ...totals, byMethod: {}, byDay: {} };
-  const daily: Record<string, any> = { ...totals, byMethod: {} };
+  const monthly: Record<string, any> = { ...totals, byDay: {} };
+  const daily: Record<string, any> = { ...totals };
 
   // IMPORTANTE: se escriben MAPAS ANIDADOS, no claves con puntos.
   // `set({ 'byMethod.cashUSD': x }, { merge: true })` crea el campo literal
@@ -102,9 +102,13 @@ export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
   // El vuelto reduce el neto por método (el reporte muestra flujo neto).
   for (const change of sale.changeGiven ?? []) addMethod(change.method, -change.amount * sign);
 
-  for (const [key, amount] of Object.entries(methodDeltas)) {
-    monthly.byMethod[key] = increment(amount);
-    daily.byMethod[key] = increment(amount);
+  if (Object.keys(methodDeltas).length > 0) {
+    monthly.byMethod = {};
+    daily.byMethod = {};
+    for (const [key, amount] of Object.entries(methodDeltas)) {
+      monthly.byMethod[key] = increment(amount);
+      daily.byMethod[key] = increment(amount);
+    }
   }
 
   const dayNumber = day.slice(8, 10);
@@ -124,8 +128,12 @@ export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
   const itemDeltas: Record<string, { n: string; q: number; rev: number; cost: number }> = {};
 
   for (const item of items) {
-    if (item.isCustom || !item.productId) continue;
-    const key = safeFieldKey(item.productId);
+    // Los abonos de fiado no son artículos (solo suman al total).
+    if (sale.fiadoId || !item.productId) continue;
+    // Venta rápida: se agrupa por nombre, no por el id temporal "custom-...".
+    const key = item.isCustom
+      ? safeFieldKey(`custom_${item.name || 'rapida'}`)
+      : safeFieldKey(item.productId);
     const unitCost = Number(item.costPrice ?? item.customCostPrice ?? 0) || fallbackUnitCost * item.price;
     const current = itemDeltas[key] ?? { n: item.name, q: 0, rev: 0, cost: 0 };
     current.n = item.name;
@@ -135,14 +143,17 @@ export function saleStatsWrites(sale: Sale, sign: 1 | -1 = 1): StatsWrites {
     itemDeltas[key] = current;
   }
 
-  daily.items = {};
-  for (const [key, value] of Object.entries(itemDeltas)) {
-    daily.items[key] = {
-      n: value.n,
-      q: increment(value.q),
-      rev: increment(value.rev),
-      cost: increment(value.cost),
-    };
+  // No escribir un mapa vacío: con merge, `items: {}` borra los artículos ya acumulados.
+  if (Object.keys(itemDeltas).length > 0) {
+    daily.items = {};
+    for (const [key, value] of Object.entries(itemDeltas)) {
+      daily.items[key] = {
+        n: value.n,
+        q: increment(value.q),
+        rev: increment(value.rev),
+        cost: increment(value.cost),
+      };
+    }
   }
 
   return { daily, monthly, day };

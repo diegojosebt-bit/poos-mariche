@@ -22,6 +22,7 @@ import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { useServerSearch } from '@/lib/firestore/use-server-search';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import { fetchDocsByIds } from '@/lib/firestore/fetch-by-ids';
+import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { useFeatureFlag } from '@/lib/features';
 
 function POSContent() {
@@ -315,6 +316,10 @@ function POSContent() {
     const handleCheckoutSuccess = (sale: Sale, consumedParts?: ReservedPart[]) => {
         // 1. INYECCIÓN ATÓMICA EN REPORTE DE VENTAS (0ms)
         addItemToCache('sale_transactions', sale);
+        if (user) {
+            queryCache.mergeIntoCatalog(user.uid, 'sale_transactions', [sale as WithId<Sale>]);
+            invalidateStatsRange(user.uid);
+        }
 
         // 2. ACTUALIZACIÓN DE STOCK EN MEMORIA
         mutateProducts((currentProducts) => {

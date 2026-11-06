@@ -13,6 +13,8 @@ import { useFirebase, useDoc, useMemoFirebase, useCollection } from "@/firebase"
 import { doc, writeBatch, collection, query, orderBy, increment, serverTimestamp, getDocs, where, limit } from "firebase/firestore";
 import { fetchDocsByIds } from '@/lib/firestore/fetch-by-ids';
 import { dailyRef, monthlyRef, saleStatsWrites } from '@/lib/firestore/rollups';
+import { queryCache, type WithId } from '@/lib/firestore/query-cache';
+import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { useToast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
@@ -491,6 +493,9 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
         } as Sale;
 
         addItemToCache('sale_transactions', resultSale);
+        // La lista paginada de Reportes también debe ver la venta sin recargar.
+        queryCache.mergeIntoCatalog(user.uid, 'sale_transactions', [resultSale as WithId<Sale>]);
+        invalidateStatsRange(user.uid);
 
         // 8. DESPACHO INMEDIATO O ENCOLADO OFFLINE (0 LECTURAS)
         const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;

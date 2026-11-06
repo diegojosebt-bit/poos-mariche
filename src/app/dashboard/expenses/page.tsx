@@ -7,7 +7,7 @@ import { dailyRef, expenseStatsWrites, monthlyRef } from '@/lib/firestore/rollup
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import type { QueryFilter } from '@/lib/firestore/cache-policy';
-import { useDailyStatsRange } from '@/lib/firestore/stats-range';
+import { useDailyStatsRange, invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { useFeatureFlag } from '@/lib/features';
 import { useDashboardStore } from '@/contexts/dashboard-context';
 import type { Expense, PaymentMethod, ExpenseCategory } from "@/lib/types";
@@ -180,25 +180,30 @@ function ExpensesContent() {
             const stats = expenseStatsWrites(expense, sign);
             void setDoc(dailyRef(firestore, user.uid, stats.day), stats.daily, { merge: true }).catch(() => {});
             void setDoc(monthlyRef(firestore, user.uid, stats.day.slice(0, 7)), stats.monthly, { merge: true }).catch(() => {});
+            invalidateStatsRange(user.uid);
         } catch (error) {
             console.warn('[gastos] No se pudieron preparar los agregados:', error);
         }
     };
 
-    const handleDelete = (id: string) => {
+    const handleDelete = async (id: string) => {
         if (!firestore || !user || !id) return;
 
         const expense = expenses?.find(ex => ex.id === id);
 
-        // Optimistic delete
-        mutateExpenses((prev) => prev?.filter(ex => ex.id !== id) || null);
-        
-        deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'expenses', id));
+        try {
+            // Primero Firestore; si falla, la fila no desaparece falsamente.
+            await deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'expenses', id));
 
-        // Fase 1: revertir el agregado del gasto (0 lecturas, best-effort).
-        if (expense) applyExpenseStats(expense, -1);
+            mutateExpenses((prev) => prev?.filter(ex => ex.id !== id) || null);
 
-        toast({ title: "Gasto eliminado", variant: "destructive" });
+            // Fase 1: revertir el agregado del gasto (0 lecturas, best-effort).
+            if (expense) applyExpenseStats(expense, -1);
+
+            toast({ title: "Gasto eliminado", variant: "destructive" });
+        } catch (error) {
+            toast({ title: "Error", description: "No se pudo eliminar el gasto.", variant: "destructive" });
+        }
     };
 
     const handleExpenseAdded = (newExpense: Expense) => {

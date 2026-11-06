@@ -3,8 +3,9 @@
 import { cleanObject } from "@/lib/json-guard";
 import { PageHeader } from "@/components/page-header";
 import { useCollection, useDoc, useFirebase, useMemoFirebase, setDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase";
-import { collection, doc, query, orderBy, limit, runTransaction, setDoc } from "firebase/firestore";
-import { fiadoOverviewWrites, overviewRef } from '@/lib/firestore/rollups';
+import { collection, doc, query, orderBy, limit, runTransaction, setDoc, increment, serverTimestamp } from "firebase/firestore";
+import { fiadoOverviewWrites, overviewRef, saleStatsWrites, dailyRef, monthlyRef } from '@/lib/firestore/rollups';
+import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import { useFeatureFlag } from '@/lib/features';
@@ -57,7 +58,7 @@ function FiadosContent() {
     const { firestore, user } = useFirebase();
     const { toast } = useToast();
     const { format: formatCurrency, getSymbol } = useCurrency();
-    const { profile } = useDashboardStore();
+    const { profile, addItemToCache } = useDashboardStore();
     const uid = user?.uid ?? '';
     const usePaged = useFeatureFlag(profile, 'pagedData');
     const [searchTerm, setSearchTerm] = useState("");
@@ -169,19 +170,22 @@ function FiadosContent() {
         }
     };
 
-    const handleDeleteFiado = (id: string) => {
+    const handleDeleteFiado = async (id: string) => {
         if (!firestore || !user) return;
 
         const fiado = fiados?.find(f => f.id === id);
 
-        // Optimistic delete
-        mutateFiados((prev) => prev?.filter(f => f.id !== id) || null);
-        
-        deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'fiados', id));
+        try {
+            // Primero Firestore; si falla, la fila no desaparece falsamente.
+            await deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'fiados', id));
 
-        if (fiado) applyFiadoStats(pendingOf(fiado), 0);
+            mutateFiados((prev) => prev?.filter(f => f.id !== id) || null);
+            if (fiado) applyFiadoStats(pendingOf(fiado), 0);
 
-        toast({ title: "Registro eliminado", variant: "destructive" });
+            toast({ title: "Registro eliminado", variant: "destructive" });
+        } catch (error) {
+            toast({ title: "Error", description: "No se pudo eliminar el fiado.", variant: "destructive" });
+        }
     };
 
     const handleFiadoAdded = (newFiado: Fiado) => {
@@ -872,6 +876,7 @@ function AddItemsToFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: 
 
 function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: Fiado) => void }) {
     const { firestore, user } = useFirebase();
+    const { addItemToCache } = useDashboardStore();
     const { toast } = useToast();
     const { format: formatCurrency, bcvRate, parallelRate, convert } = useCurrency();
     const [open, setOpen] = useState(false);
@@ -943,6 +948,7 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
         }
 
         setLoading(true);
+        let saleDataForCache: Sale | null = null;
         try {
             const updatedFiado: any = {};
             await runTransaction(firestore, async (transaction) => {
@@ -958,13 +964,28 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
                 const newPaid = currentFiado.amountPaid + finalNetAbonoInUSD;
                 const isFullyPaid = newPaid >= (currentFiado.totalAmount - 0.01);
 
+                // El abono cobra deuda ya vendida: se le asigna su parte del costo
+                // original y se marca como custom para que NO aparezca como "artículo".
+                const costRatio = currentFiado.totalAmount > 0
+                    ? Number(currentFiado.totalCost || 0) / currentFiado.totalAmount
+                    : 0;
+                const abonoCost = Number((finalNetAbonoInUSD * costRatio).toFixed(2));
+
                 const saleData = cleanObject({
                     id: saleId,
                     fiadoId: fiado.id,
-                    items: [{ productId: fiado.id!, name: `Abono Fiado: ${currentFiado.customerName}`, quantity: 1, price: finalNetAbonoInUSD }],
+                    items: [{
+                        productId: fiado.id!,
+                        name: `Abono Fiado: ${currentFiado.customerName}`,
+                        quantity: 1,
+                        price: finalNetAbonoInUSD,
+                        costPrice: abonoCost,
+                        isCustom: true,
+                    }],
                     totalAmount: finalNetAbonoInUSD,
                     subtotal: finalNetAbonoInUSD,
                     discount: 0,
+                    costPrice: abonoCost,
                     paymentMethod: payments.map(p => p.method).join(', '),
                     transactionDate: new Date().toISOString(),
                     status: 'completed',
@@ -977,6 +998,22 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
                 });
 
                 transaction.set(saleRef, saleData);
+
+                // El abono también debe entrar en los agregados: totales sí,
+                // desglose por artículo no (su ítem es isCustom).
+                const stats = saleStatsWrites(saleData as Sale);
+                transaction.set(dailyRef(firestore, user.uid, stats.day), stats.daily, { merge: true });
+                transaction.set(monthlyRef(firestore, user.uid, stats.day.slice(0, 7)), stats.monthly, { merge: true });
+                transaction.set(
+                    doc(firestore, 'users', user.uid, 'system', 'estadisticas_actuales'),
+                    {
+                        totalRealSales30d: increment(finalNetAbonoInUSD),
+                        totalRealProfit30d: increment(finalNetAbonoInUSD - abonoCost),
+                        updatedAt: serverTimestamp(),
+                    },
+                    { merge: true },
+                );
+
                 transaction.update(fiadoRef, {
                     amountPaid: Number(newPaid.toFixed(2)),
                     status: isFullyPaid ? 'Pagado' : 'Pendiente'
@@ -987,8 +1024,16 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
                     amountPaid: Number(newPaid.toFixed(2)),
                     status: isFullyPaid ? 'Pagado' : 'Pendiente'
                 });
+
+                saleDataForCache = saleData as Sale;
             });
             
+            if (saleDataForCache) {
+                addItemToCache('sale_transactions', saleDataForCache);
+                queryCache.mergeIntoCatalog(user.uid, 'sale_transactions', [saleDataForCache]);
+                invalidateStatsRange(user.uid);
+            }
+
             toast({ title: "Abono Registrado" });
             onUpdated(updatedFiado as Fiado);
             setOpen(false);
