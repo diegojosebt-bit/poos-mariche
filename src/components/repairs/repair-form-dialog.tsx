@@ -30,7 +30,7 @@ import { useState, useEffect, ReactNode, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/use-currency";
 import { Label } from "../ui/label";
-import { useFirebase, useCollection, useMemoFirebase, useDoc } from "@/firebase";
+import { useFirebase, useCollection, useMemoFirebase, useDoc, setDocumentNonBlocking } from "@/firebase";
 import { useDashboardStore } from "@/contexts/dashboard-context";
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { useServerSearch } from '@/lib/firestore/use-server-search';
@@ -233,7 +233,23 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
   const { toast } = useToast();
   const { getFinalPrice, getDynamicPrice, format: formatCurrency, bcvRate, parallelRate } = useCurrency();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const [lookedUpCustomer, setLookedUpCustomer] = useState<any>(null);
+
+  useEffect(() => {
+    const sync = () => setIsOnline(navigator.onLine);
+    sync();
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => {
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOnline) setPartsPopoverOpen(false);
+  }, [isOnline]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -364,6 +380,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
   }, [repairJob, open, form]);
 
   const handleAddPartFromInventory = async (p: Product) => {
+    if (!ensureOnline(toast, 'Agregar repuesto de inventario')) return;
       let freshProduct = p;
       if (firestore && user) {
           const snap = await getDoc(doc(firestore, 'users', user.uid, 'products', p.id!));
@@ -398,7 +415,35 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     if (!firestore || !user || isSubmitting) return;
-    if (!ensureOnline(toast, 'Guardar reparación')) return;
+
+    const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (offline) {
+      if (repairJob) {
+        toast({
+          variant: 'destructive',
+          title: 'Sin conexión',
+          description: 'No puedes editar una reparación existente sin internet.',
+        });
+        return;
+      }
+      if (values.status === 'Completado') {
+        toast({
+          variant: 'destructive',
+          title: 'Sin conexión',
+          description: 'No puedes completar ni entregar una reparación sin internet.',
+        });
+        return;
+      }
+      if (values.reservedParts.some((part) => !part.isManual)) {
+        toast({
+          variant: 'destructive',
+          title: 'Sin conexión',
+          description: 'Solo puedes usar piezas manuales mientras estás offline.',
+        });
+        return;
+      }
+    }
 
     const remainingDebt = Math.max(0, estimatedTotal - currentPaid);
     const hasPendingDebt = remainingDebt > 0.009 && !repairJob?.isPaid;
@@ -409,6 +454,52 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
             title: "Entrega Bloqueada por Deuda",
             description: `No se puede guardar en estado 'Completado'. Esta reparación tiene un saldo pendiente de $${remainingDebt.toFixed(2)}. Debe saldarse el monto antes de la entrega.`
         });
+        return;
+    }
+
+    if (offline) {
+        setIsSubmitting(true);
+        try {
+            const jobId = `R-${format(new Date(), "yyMMdd")}-${Math.floor(1000 + Math.random() * 9000)}`;
+            const jobRef = doc(firestore, 'users', user.uid, 'repair_jobs', jobId);
+            const finalReservedParts = values.reservedParts.filter(p => !p.isConsumed);
+            const finalConsumedParts = values.reservedParts.filter(p => p.isConsumed);
+            const calculatedPartsCost = [...finalReservedParts, ...finalConsumedParts]
+                .reduce((sum, p) => sum + (Number(p.costPrice || 0) * Number(p.quantity || 1)), 0);
+
+            const finalData = cleanObject({
+                ...values,
+                id: jobId,
+                estimatedCost: Number(estimatedTotal.toFixed(2)),
+                partsCost: Number(calculatedPartsCost.toFixed(2)),
+                amountPaid: currentPaid,
+                isPaid: currentPaid >= (estimatedTotal - 0.01),
+                status: (currentPaid >= (estimatedTotal - 0.01) && values.status === 'Pendiente') ? 'Pagado' : values.status,
+                createdAt: new Date().toISOString(),
+                reservedParts: finalReservedParts.map(({ isConsumed, ...p }) => p),
+                consumedParts: finalConsumedParts.map(({ isConsumed, ...p }) => p),
+                partsConsumed: false,
+                isPromo: effectiveIsPromo,
+            });
+
+            // Sin await: offline la escritura queda en la caché persistente y se
+            // sincroniza sola. Esperar la confirmación del servidor colgaría el modal.
+            void setDocumentNonBlocking(jobRef, finalData, { merge: true }).catch(() => {});
+
+            onSaved?.(finalData as RepairJob);
+            toast({
+                title: 'Reparación guardada sin conexión',
+                description: 'Se sincronizará automáticamente cuando vuelva el internet.',
+            });
+            if (!repairJob) {
+                handlePrintAllTickets({ repairJob: finalData as RepairJob, businessName: profile?.businessName, profile, bcvRate, parallelRate }, () => {});
+            }
+            setOpen(false);
+        } catch (error: any) {
+            toast({ variant: 'destructive', title: 'Error', description: error.message });
+        } finally {
+            setIsSubmitting(false);
+        }
         return;
     }
 
@@ -498,6 +589,11 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
         <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 overflow-hidden">
                 <div className="flex-1 overflow-y-auto px-4 sm:px-6 space-y-6 pb-6">
+                    {!isOnline && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold uppercase leading-relaxed text-amber-800">
+                            Sin conexión: solo reparaciones nuevas con piezas manuales. Editar o completar una reparación requiere internet.
+                        </div>
+                    )}
                     <div className="space-y-4">
                         <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2 border-b pb-1"><User className="w-3 h-3" /> Información del Cliente</span>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -522,7 +618,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                             <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><Package className="w-3 h-3" /> Repuestos y Servicios</span>
                             <div className="flex gap-1.5">
                                 <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
-                                    <PopoverTrigger asChild><Button type="button" variant="outline" size="sm" className="h-7 text-[9px] font-black px-2"><Search className="w-3 h-3 mr-1" /> AÑADIR (+)</Button></PopoverTrigger>
+                                    <PopoverTrigger asChild><Button type="button" variant="outline" size="sm" disabled={!isOnline} title={!isOnline ? 'Sin conexión: usa una pieza manual' : undefined} className="h-7 text-[9px] font-black px-2"><Search className="w-3 h-3 mr-1" /> {isOnline ? 'AÑADIR (+)' : 'INVENTARIO OFF'}</Button></PopoverTrigger>
                                     <PopoverContent className="p-0 w-[280px] sm:w-[350px]" align="end">
                                         <Command shouldFilter={false}><CommandInput placeholder="BUSCAR..." className="h-9" value={productSearch} onValueChange={setProductSearch} /><CommandList>
                                             {productsLoading && <div className="p-4 text-center"><Loader2 className="h-4 w-4 animate-spin mx-auto text-primary" /></div>}

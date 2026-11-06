@@ -42,6 +42,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useDashboardStore } from "@/contexts/dashboard-context"
 import { queryCache } from "@/lib/firestore/query-cache"
 import { ensureOnline } from "@/lib/offline-guard"
+import { getOfflineQueue } from "@/lib/offline-sync-manager"
 
 const repairStatuses: RepairStatus[] = ['Pendiente', 'Pagado', 'Completado', 'Garantía'];
 
@@ -194,6 +195,22 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
     const hasPendingDebt = !isFullyPaid && remainingBalance > 0.009;
 
     const handlePay = () => {
+        // Evita un segundo pago mientras el primero sigue en la cola offline:
+        // el saldo real no se puede validar sin internet.
+        if (user) {
+            const hasPendingPayment = getOfflineQueue(user.uid).some(
+                (op) => op.payload?.repairUpdate?.repairJobId === repairJob.id,
+            );
+            if (hasPendingPayment) {
+                toast({
+                    variant: "destructive",
+                    title: "Pago pendiente de sincronizar",
+                    description: "Ya hay un pago offline para esta reparación. Conecta a internet para validar el saldo antes de cobrar de nuevo.",
+                });
+                return;
+            }
+        }
+
         const cleanJob = cleanObject({
             id: repairJob.id,
             customerName: repairJob.customerName,
