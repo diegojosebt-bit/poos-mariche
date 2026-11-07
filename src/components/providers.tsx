@@ -13,20 +13,26 @@ function AppContent({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const [minSplashDone, setMinSplashDone] = useState(false);
   const [hideSplash, setHideSplash] = useState(false);
+  const [bootTimedOut, setBootTimedOut] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const reduced = typeof window !== 'undefined'
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const timer = setTimeout(() => setMinSplashDone(true), reduced ? 450 : 2300);
-    return () => clearTimeout(timer);
+    const timer = setTimeout(() => setMinSplashDone(true), reduced ? 300 : 1600);
+    const bootTimer = setTimeout(() => setBootTimedOut(true), 4500);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(bootTimer);
+    };
   }, []);
 
-  const appReady = mounted && !isUserLoading;
+  // Failsafe: si Firebase no responde, no dejar el splash infinito.
+  const appReady = mounted && (!isUserLoading || bootTimedOut);
 
   useEffect(() => {
     if (!appReady || !minSplashDone) return;
-    const timer = setTimeout(() => setHideSplash(true), 400);
+    const timer = setTimeout(() => setHideSplash(true), 250);
     return () => clearTimeout(timer);
   }, [appReady, minSplashDone]);
 

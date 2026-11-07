@@ -139,19 +139,19 @@
 
 .mm-splash-m {
   animation:
-    mm-splash-draw 1.05s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards,
-    mm-splash-show 0.2s ease-out 0.1s forwards;
+    mm-splash-draw 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.05s forwards,
+    mm-splash-show 0.15s ease-out 0.05s forwards;
 }
 
 .mm-splash-p {
   animation:
-    mm-splash-draw 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.95s forwards,
-    mm-splash-show 0.2s ease-out 0.95s forwards;
+    mm-splash-draw 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.7s forwards,
+    mm-splash-show 0.15s ease-out 0.7s forwards;
 }
 
 .mm-splash-word {
   opacity: 0;
-  animation: mm-splash-fade 0.5s cubic-bezier(0.22, 1, 0.36, 1) 1.8s forwards;
+  animation: mm-splash-fade 0.4s cubic-bezier(0.22, 1, 0.36, 1) 1.35s forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
