@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, ShieldCheck, UserCog, MoveHorizontal, PiggyBank, DownloadCloud, RefreshCw, Receipt, ShieldAlert, Lock, Trash2, Wrench, KeyRound, Package, HandCoins } from "lucide-react";
+import { LogOut, ShieldCheck, UserCog, MoveHorizontal, PiggyBank, DownloadCloud, RefreshCw, Receipt, ShieldAlert, Lock, Trash2, Wrench, KeyRound, Package, HandCoins, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { z } from "zod";
@@ -81,6 +81,8 @@ function SettingsContent() {
     const { toast } = useToast();
     const { firestore, user, auth } = useFirebase();
     const [isUpdatingPin, setIsUpdatingPin] = useState(false);
+    const [isSavingProfile, setIsSavingProfile] = useState(false);
+    const [ticketPrefsDirty, setTicketPrefsDirty] = useState(false);
     const [isRecoveringPin, setIsRecoveringPin] = useState(false);
     const [showPinRecovery, setShowPinRecovery] = useState(false);
     const [showPinEditor, setShowPinEditor] = useState(false);
@@ -153,6 +155,18 @@ function SettingsContent() {
         deleteFiados: true,
         deleteExpenses: true,
     });
+
+    const securityDirty = useMemo(() => {
+        if (newPin.trim() || currentPinVerify.trim()) return true;
+        const profileLocked = profile?.isDataDeletionLocked !== false;
+        const currentModules = [...lockedModules].sort().join(",");
+        const savedModules = [...(profile?.lockedModules || [])].sort().join(",");
+        return (
+            isPinRequired !== Boolean(profile?.isPinRequired) ||
+            isDataDeletionLocked !== profileLocked ||
+            currentModules !== savedModules
+        );
+    }, [newPin, currentPinVerify, isPinRequired, isDataDeletionLocked, lockedModules, profile]);
 
     const [pinVerifyModal, setPinVerifyModal] = useState<{
         open: boolean;
@@ -260,15 +274,26 @@ function SettingsContent() {
                     showRateOnReceipt: profileForm.getValues("showRateOnReceipt"),
                 }, { merge: true });
             }
+            settingsForm.reset(values);
+            setTicketPrefsDirty(false);
             toast({ title: "Configuración Guardada" });
         } catch (e) { toast({ variant: "destructive", title: "Error" }); }
         finally { setIsSavingSettings(false); }
     };
 
-    const handleSaveProfile = (values: z.infer<typeof profileSchema>) => {
-        if (!userProfileRef) return;
-        setDocumentNonBlocking(userProfileRef, values, { merge: true });
-        toast({ title: "Perfil y Datos de Ticket Guardados" });
+    const handleSaveProfile = async (values: z.infer<typeof profileSchema>) => {
+        if (!userProfileRef || isSavingProfile) return;
+        setIsSavingProfile(true);
+        try {
+            await setDocumentNonBlocking(userProfileRef, values, { merge: true });
+            profileForm.reset(values);
+            setTicketPrefsDirty(false);
+            toast({ title: "Perfil y Datos de Ticket Guardados" });
+        } catch {
+            toast({ variant: "destructive", title: "No se pudieron guardar los datos" });
+        } finally {
+            setIsSavingProfile(false);
+        }
     };
 
     const handleRecoverPinWithPassword = async () => {
@@ -519,9 +544,9 @@ function SettingsContent() {
                             type="button"
                             className="w-full font-bold uppercase"
                             onClick={handleUpdatePinSettings}
-                            disabled={isUpdatingPin}
+                            disabled={!securityDirty || isUpdatingPin}
                         >
-                            {isUpdatingPin ? "Guardando..." : "Guardar Bloqueo de Datos"}
+                            {isUpdatingPin ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Guardando...</> : "Guardar Bloqueo de Datos"}
                         </Button>
                         </CardContent>
                     </Card>
@@ -694,9 +719,9 @@ function SettingsContent() {
                                 <Button 
                                     className="w-full font-bold shadow-md uppercase" 
                                     onClick={handleUpdatePinSettings} 
-                                    disabled={isUpdatingPin}
+                                    disabled={!securityDirty || isUpdatingPin}
                                 >
-                                    {isUpdatingPin ? "Guardando..." : hasSecurityPin ? "Guardar Bloqueo de Módulos" : "Guardar PIN y Seguridad"}
+                                    {isUpdatingPin ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Guardando...</> : hasSecurityPin ? "Guardar Bloqueo de Módulos" : "Guardar PIN y Seguridad"}
                                 </Button>
                             </div>
                         </div>
@@ -746,7 +771,9 @@ function SettingsContent() {
                                 )}
                             </CardContent>
                             <CardFooter className="border-t pt-4">
-                                <Button type="submit" className="uppercase font-bold">Guardar Políticas</Button>
+                                <Button type="submit" disabled={!profileForm.formState.isDirty || isSavingProfile} className="uppercase font-bold">
+                                    {isSavingProfile ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Guardando...</> : "Guardar Políticas"}
+                                </Button>
                             </CardFooter>
                         </form>
                     </Form>
@@ -793,7 +820,9 @@ function SettingsContent() {
                                 </div>
                             </CardContent>
                             <CardFooter className="border-t pt-4">
-                                <Button type="submit" className="uppercase font-bold">Guardar Datos de Ticket</Button>
+                                <Button type="submit" disabled={!profileForm.formState.isDirty || isSavingProfile} className="uppercase font-bold">
+                                    {isSavingProfile ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Guardando...</> : "Guardar Datos de Ticket"}
+                                </Button>
                             </CardFooter>
                         </form>
                     </Form>
@@ -848,7 +877,10 @@ function SettingsContent() {
                                         </div>
                                         <Switch
                                             checked={profileForm.watch("showRateOnReceipt")}
-                                            onCheckedChange={(value) => profileForm.setValue("showRateOnReceipt", value, { shouldDirty: true })}
+                                            onCheckedChange={(value) => {
+                                                profileForm.setValue("showRateOnReceipt", value, { shouldDirty: true });
+                                                setTicketPrefsDirty(true);
+                                            }}
                                         />
                                     </div>
                                     <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/20">
@@ -858,12 +890,19 @@ function SettingsContent() {
                                         </div>
                                         <Switch
                                             checked={profileForm.watch("showInfoOnReceipt")}
-                                            onCheckedChange={(value) => profileForm.setValue("showInfoOnReceipt", value, { shouldDirty: true })}
+                                            onCheckedChange={(value) => {
+                                                profileForm.setValue("showInfoOnReceipt", value, { shouldDirty: true });
+                                                setTicketPrefsDirty(true);
+                                            }}
                                         />
                                     </div>
                                 </div>
                             </CardContent>
-                            <CardFooter className="border-t pt-4"><Button type="submit" disabled={isSavingSettings} className="uppercase font-bold">Guardar Parámetros</Button></CardFooter>
+                            <CardFooter className="border-t pt-4">
+                                <Button type="submit" disabled={isSavingSettings || (!settingsForm.formState.isDirty && !ticketPrefsDirty)} className="uppercase font-bold">
+                                    {isSavingSettings ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Guardando...</> : "Guardar Parámetros"}
+                                </Button>
+                            </CardFooter>
                         </form>
                     </Form>
                 </Card>
