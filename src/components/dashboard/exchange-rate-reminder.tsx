@@ -283,7 +283,7 @@ export function ExchangeRateReminder() {
                         </div>
                     )}
 
-                    <DropdownMenu>
+                    <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
                             <Button
                                 variant="ghost"
@@ -295,7 +295,7 @@ export function ExchangeRateReminder() {
                                 <UserAvatarIcon style={{ width: 25, height: 25 }} />
                             </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-64">
+                        <DropdownMenuContent align="end" sideOffset={6} className="w-64">
                             <DropdownMenuLabel className="font-normal">
                                 <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
                                     Cuenta
