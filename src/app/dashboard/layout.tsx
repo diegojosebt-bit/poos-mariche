@@ -18,6 +18,7 @@ import { SecurityUnlockedPill } from '@/components/security/security-unlocked-pi
 import { RepairDraftPill } from '@/components/repairs/repair-draft-pill';
 import { OfflineSyncPill } from '@/components/offline/offline-sync-pill';
 import { DashboardProvider, useDashboardStore } from '@/contexts/dashboard-context';
+import { DraftModalsProvider, DraftRestorePill } from '@/contexts/draft-modals-context';
 import { type ReactNode, useEffect, useState } from 'react';
 
 const SESSION_KEY = 'mm_session_id';
@@ -174,17 +175,20 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
     }
 
     return (
-        <SidebarProvider>
-            <SidebarNav />
-            <SidebarInset>
-                <GlobalAnnouncement />
-                <SecurityUnlockedPill />
-                <ExchangeRateReminder />
-                {children}
-                <RepairDraftPill />
-                <OfflineSyncPill />
-            </SidebarInset>
-        </SidebarProvider>
+        <DraftModalsProvider>
+            <SidebarProvider>
+                <SidebarNav />
+                <SidebarInset>
+                    <GlobalAnnouncement />
+                    <SecurityUnlockedPill />
+                    <ExchangeRateReminder />
+                    {children}
+                    <RepairDraftPill />
+                    <OfflineSyncPill />
+                    <DraftRestorePill />
+                </SidebarInset>
+            </SidebarProvider>
+        </DraftModalsProvider>
     );
 }
 

@@ -73,7 +73,11 @@ export function ExportRepairsDialog({ repairs: initialRepairs }: ExportRepairsDi
         );
 
         const snap = await getDocs(pageQuery);
-        list.push(...snap.docs.map((doc) => ({ ...doc.data(), id: doc.id }) as RepairJob));
+        list.push(
+          ...snap.docs
+            .filter((doc) => !(doc.data() as RepairJob).isDeleted)
+            .map((doc) => ({ ...doc.data(), id: doc.id }) as RepairJob),
+        );
 
         if (snap.size < 200) break;
         last = snap.docs[snap.docs.length - 1];

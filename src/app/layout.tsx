@@ -8,7 +8,12 @@ export const metadata: Metadata = {
   description: 'Sistema de gestión integral para ventas, inventario, caja, reparaciones y reportes de transacciones.',
   manifest: '/manifest.json',
   icons: {
-    icon: '/favicon.ico',
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/icon.png', type: 'image/png', sizes: '512x512' },
+    ],
+    shortcut: '/favicon.ico',
     apple: '/apple-icon.png',
   },
   appleWebApp: {

@@ -14,11 +14,12 @@ export function SplashScreen({ exiting = false }: { exiting?: boolean }) {
           className="w-36 sm:w-44"
           role="img"
           aria-label="MARICHE POS"
+          shapeRendering="geometricPrecision"
         >
           <g transform="translate(80 50) skewX(-10) translate(-80 -50)">
             {/* M geométrica inclinada */}
             <path
-              pathLength={1}
+              pathLength={100}
               d="M25 78 V28 L60 64 L95 28 V78"
               fill="none"
               stroke="#FFFFFF"
@@ -29,7 +30,7 @@ export function SplashScreen({ exiting = false }: { exiting?: boolean }) {
             />
             {/* P: comparte el palo derecho de la M */}
             <path
-              pathLength={1}
+              pathLength={100}
               d="M95 28 H120 C138 28 138 56 120 56 H95"
               fill="none"
               stroke="#3B82F6"

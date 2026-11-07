@@ -32,6 +32,7 @@ import { useCurrency } from "@/hooks/use-currency";
 import { Label } from "../ui/label";
 import { useFirebase, useCollection, useMemoFirebase, useDoc, setDocumentNonBlocking } from "@/firebase";
 import { useDashboardStore } from "@/contexts/dashboard-context";
+import { persistDraft } from "@/contexts/draft-modals-context";
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { useServerSearch } from '@/lib/firestore/use-server-search';
 import { queryCache } from '@/lib/firestore/query-cache';
@@ -39,7 +40,7 @@ import { useFeatureFlag } from '@/lib/features';
 import { normalizeText } from '@/lib/search-index';
 import { doc, runTransaction, type DocumentSnapshot, collection, query, orderBy, limit, increment, getDoc, where, getDocs } from "firebase/firestore";
 import { handlePrintAllTickets } from "./repair-ticket";
-import { User, Smartphone, Package, Search, Plus, Trash2, Loader2, DollarSign, Calculator, UserCheck, Hammer, TicketPercent, Landmark, X } from "lucide-react";
+import { User, Smartphone, Package, Search, Plus, Trash2, Loader2, DollarSign, Calculator, UserCheck, Hammer, TicketPercent, Landmark, X, Minimize2 } from "lucide-react";
 import { format, addDays } from "date-fns";
 import { es } from "date-fns/locale";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -219,7 +220,7 @@ function ManualPartDialog({ onAdd, open, onOpenChange }: { onAdd: (part: any) =>
     );
 }
 
-export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, onSaved }: { repairJob?: RepairJob | null, children?: ReactNode, isOpen?: boolean, onOpenChange?: (v: boolean) => void, onSaved?: (job: RepairJob) => void }) {
+export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, onSaved, initialDraft, onMinimize }: { repairJob?: RepairJob | null, children?: ReactNode, isOpen?: boolean, onOpenChange?: (v: boolean) => void, onSaved?: (job: RepairJob) => void, initialDraft?: z.infer<typeof formSchema>, onMinimize?: (values: z.infer<typeof formSchema>) => void }) {
   const { firestore, user } = useFirebase();
   const [internalOpen, setInternalOpen] = useState(false);
   const [partsPopoverOpen, setPartsPopoverOpen] = useState(false);
@@ -289,11 +290,19 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
     pageSize: 20,
     enabled: open && usePaged,
     onResults: (found) => {
-      if (user?.uid) queryCache.mergeIntoCatalog(user.uid, 'products', found);
+      if (user?.uid) queryCache.mergeIntoCatalog(user.uid, 'products', found.filter((product) => !product.isDeleted));
     },
   });
 
-  const allProducts = usePaged ? pagedProducts.items : legacyProducts.data;
+  const allProducts = useMemo(() => {
+    const source = (usePaged ? pagedProducts.items : legacyProducts.data) || [];
+    const seen = new Set<string>();
+    return source.filter((product) => {
+      if (!product?.id || product.isDeleted || seen.has(product.id)) return false;
+      seen.add(product.id);
+      return true;
+    });
+  }, [usePaged, pagedProducts.items, legacyProducts.data]);
   const productsLoading = usePaged ? pagedProducts.isLoading : legacyProducts.isLoading;
 
   const searchResults = useMemo(() => {
@@ -374,13 +383,19 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
             ];
             form.reset({ ...repairJob, status: repairJob.status as any, reservedParts: allParts });
         } else {
-            form.reset({ customerName: "", customerPhone: "", customerID: "", customerAddress: "", deviceMake: "", deviceModel: "", reportedIssue: "", status: "Pendiente", reservedParts: [], isPromo: false, notes: "" });
+            form.reset({
+                customerName: "", customerPhone: "", customerID: "", customerAddress: "",
+                deviceMake: "", deviceModel: "", reportedIssue: "", status: "Pendiente",
+                reservedParts: [], isPromo: false, notes: "",
+                ...(initialDraft || {}),
+            });
         }
     }
-  }, [repairJob, open, form]);
+  }, [repairJob, open, form, initialDraft]);
 
   const handleAddPartFromInventory = async (p: Product) => {
     if (!ensureOnline(toast, 'Agregar repuesto de inventario')) return;
+    if (!p || p.isDeleted) return;
       let freshProduct = p;
       if (firestore && user) {
           const snap = await getDoc(doc(firestore, 'users', user.uid, 'products', p.id!));
@@ -578,7 +593,18 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-hidden flex flex-col p-0">
+      <DialogContent
+        className="sm:max-w-[650px] max-h-[90vh] overflow-hidden flex flex-col p-0"
+        onMinimize={!repairJob && onMinimize ? () => {
+            const values = form.getValues();
+            persistDraft('repair', values);
+            try {
+                onMinimize(values);
+            } finally {
+                setOpen(false);
+            }
+        } : undefined}
+      >
         <div className="p-4 sm:p-6 pb-2 shrink-0">
             <DialogHeader>
                 <DialogTitle className="uppercase font-bold text-base sm:text-lg">{repairJob ? 'Gestionar Trabajo' : 'Nueva Recepción Técnica'}</DialogTitle>
@@ -617,23 +643,53 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                         <div className="flex items-center justify-between border-b pb-1">
                             <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><Package className="w-3 h-3" /> Repuestos y Servicios</span>
                             <div className="flex gap-1.5">
-                                <Popover open={partsPopoverOpen} onOpenChange={setPartsPopoverOpen}>
-                                    <PopoverTrigger asChild><Button type="button" variant="outline" size="sm" disabled={!isOnline} title={!isOnline ? 'Sin conexión: usa una pieza manual' : undefined} className="h-7 text-[9px] font-black px-2"><Search className="w-3 h-3 mr-1" /> {isOnline ? 'AÑADIR (+)' : 'INVENTARIO OFF'}</Button></PopoverTrigger>
-                                    <PopoverContent className="p-0 w-[280px] sm:w-[350px]" align="end">
-                                        <Command shouldFilter={false}><CommandInput placeholder="BUSCAR..." className="h-9" value={productSearch} onValueChange={setProductSearch} /><CommandList>
-                                            {productsLoading && <div className="p-4 text-center"><Loader2 className="h-4 w-4 animate-spin mx-auto text-primary" /></div>}
-                                            <CommandEmpty>{!productsLoading && "Sin resultados."}</CommandEmpty><CommandGroup>
-                                                {searchResults.map((p) => (
-                                                    <CommandItem key={p.id} onSelect={() => handleAddPartFromInventory(p)} className="flex justify-between items-center text-xs">
-                                                        <span className="font-bold uppercase truncate max-w-[150px]">{p.name}</span><Badge variant="secondary" className="text-[8px] h-4">{p.stockLevel - (p.reservedStock || 0)} DISP.</Badge>
-                                                    </CommandItem>
-                                                ))}
-                                            </CommandGroup></CommandList></Command>
-                                    </PopoverContent>
-                                </Popover>
+                                <Button type="button" variant="outline" size="sm" disabled={!isOnline} title={!isOnline ? 'Sin conexión: usa una pieza manual' : undefined} className="h-7 text-[9px] font-black px-2" onClick={() => setPartsPopoverOpen((prev) => !prev)}><Search className="w-3 h-3 mr-1" /> {isOnline ? 'INVENTARIO' : 'INVENTARIO OFF'}</Button>
                                 <Button type="button" variant="outline" size="sm" className="h-7 text-[9px] font-black px-2 border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => setManualQuickAddOpen(true)}><Plus className="w-3 h-3 mr-1" /> MANUAL (+)</Button>
                             </div>
                         </div>
+                        {partsPopoverOpen && isOnline && (
+                            <div className="rounded-xl border border-primary/15 bg-primary/[0.02] p-3 shadow-sm animate-in fade-in slide-in-from-top-1">
+                                <div className="flex items-center gap-2">
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                                        <Input
+                                            placeholder="BUSCAR REPUESTO..."
+                                            className="h-9 pl-8 text-xs font-bold uppercase"
+                                            value={productSearch}
+                                            onChange={(event) => setProductSearch(event.target.value)}
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setPartsPopoverOpen(false)} aria-label="Cerrar búsqueda">
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                                <div className="mt-2 max-h-60 space-y-1 overflow-y-auto">
+                                    {productsLoading && <div className="p-4 text-center"><Loader2 className="h-4 w-4 animate-spin mx-auto text-primary" /></div>}
+                                    {!productsLoading && searchResults.length === 0 && (
+                                        <p className="p-3 text-center text-[10px] text-muted-foreground">Sin resultados.</p>
+                                    )}
+                                    {searchResults.map((p) => (
+                                        <button
+                                            type="button"
+                                            key={p.id}
+                                            onClick={() => handleAddPartFromInventory(p)}
+                                            className="flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-white px-3 py-2 text-left shadow-sm transition-colors hover:border-primary/30 hover:bg-primary/5"
+                                        >
+                                            <div className="min-w-0">
+                                                <p className="truncate text-[11px] font-black uppercase">{p.name}</p>
+                                                <p className="text-[9px] font-bold uppercase text-muted-foreground">
+                                                    {p.stockLevel - (p.reservedStock || 0)} disponibles
+                                                </p>
+                                            </div>
+                                            <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-[9px] font-black uppercase text-primary">
+                                                <Plus className="h-3 w-3" /> Agregar
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                         <div className="space-y-2">
                             {reservedParts.length === 0 && <p className="text-center text-[10px] text-muted-foreground italic py-4 bg-muted/20 rounded-md border border-dashed">Sin materiales añadidos.</p>}
                             {reservedParts.map((part) => {
@@ -659,7 +715,11 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                         <div className="text-right"><span className="text-2xl sm:text-3xl font-black text-white leading-none">${(estimatedTotal - currentPaid).toFixed(2)}</span><p className="text-[10px] text-slate-500 font-bold uppercase">Saldo Pendiente</p></div></div>
                     </div>
                 </div>
-                <DialogFooter className="p-4 sm:p-6 border-t bg-white shrink-0"><Button type="submit" disabled={isSubmitting} className="w-full h-11 font-bold shadow-lg uppercase">{isSubmitting ? <Loader2 className="animate-spin h-5 w-5" /> : (repairJob ? "GUARDAR CAMBIOS" : "REGISTRAR Y GENERAR TICKET")}</Button></DialogFooter>
+                <DialogFooter className="p-4 sm:p-6 border-t bg-white shrink-0">
+                    <Button type="submit" disabled={isSubmitting} className="w-full h-11 font-bold shadow-lg uppercase">
+                        {isSubmitting ? <Loader2 className="animate-spin h-5 w-5" /> : (repairJob ? "GUARDAR CAMBIOS" : "REGISTRAR Y GENERAR TICKET")}
+                    </Button>
+                </DialogFooter>
             </form>
         </Form>
         <ManualPartDialog open={manualQuickAddOpen} onOpenChange={setManualQuickAddOpen} onAdd={handleAddManualPart} />

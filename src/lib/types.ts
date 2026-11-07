@@ -77,6 +77,10 @@ export type RepairJob = {
   warrantyEndDate?: string;
   partsConsumed?: boolean; 
   isPromo?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletionReason?: string;
 };
 
 export type FiadoStatus = 'Pendiente' | 'Pagado';
@@ -233,6 +237,8 @@ export type Sale = {
   transactionDate: string;
   payments: Payment[];
   status: 'completed' | 'refunded';
+  isRefund?: boolean;
+  refundOfSaleId?: string;
   refundedAt?: string;
   refundReason?: string;
   refundPaymentMethod?: PaymentMethod;
@@ -335,6 +341,7 @@ export type UserProfile = {
   businessName?: string;
   businessAddress?: string;
   businessRIF?: string;
+  businessPhone?: string;
   showInfoOnReceipt?: boolean;
   showRateOnReceipt?: boolean;
   showTermsOnReceipt?: boolean;

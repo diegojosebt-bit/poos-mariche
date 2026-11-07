@@ -19,7 +19,7 @@ import { useFirebase } from "@/firebase";
 import { useDashboardStore } from "@/contexts/dashboard-context";
 import { doc, runTransaction, getDoc, type DocumentSnapshot } from "firebase/firestore";
 import { saleStatsWrites } from '@/lib/firestore/rollups';
-import { queryCache } from '@/lib/firestore/query-cache';
+import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { ensureOnline } from '@/lib/offline-guard';
 import { Badge } from "../ui/badge";
@@ -73,7 +73,7 @@ const ITEMS_PER_PAGE = 20;
 
 const RefundButton = ({ sale }: { sale: Sale }) => {
     const { firestore, user } = useFirebase();
-    const { updateCachedItem } = useDashboardStore();
+    const { updateCachedItem, addItemToCache } = useDashboardStore();
     const { toast } = useToast();
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [refundReason, setRefundReason] = useState("");
@@ -86,6 +86,14 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
         if (!ensureOnline(toast, 'Procesar un reembolso')) return;
         
         const refundedAt = new Date().toISOString();
+        const productCachePatches: Array<{
+            id: string;
+            stockLevel: number;
+            damagedStock: number;
+            reservedStock: number;
+        }> = [];
+        let refundedRepairId: string | null = null;
+        let refundSaleForCache: Sale | null = null;
         setIsProcessing(true);
         try {
             await runTransaction(firestore, async (transaction) => {
@@ -147,6 +155,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                 const realProfitUSD = realRevenueUSD - totalCostToDeductUSD;
 
                 if (repairJobSnap?.exists() && repairJobData) {
+                    refundedRepairId = repairJobSnap.ref.id;
                     transaction.update(repairJobSnap.ref, { 
                         status: 'Pendiente', 
                         isPaid: false, 
@@ -174,6 +183,13 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                             damagedStock: newDamaged,
                             reservedStock: newReserved
                         });
+
+                        productCachePatches.push({
+                            id: pid,
+                            stockLevel: newStock,
+                            damagedStock: newDamaged,
+                            reservedStock: newReserved,
+                        });
                     }
                 }
 
@@ -190,6 +206,38 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     refundReason,
                     refundPaymentMethod: refundMethod 
                 });
+
+                // Si la venta ya estaba cerrada, la devolución es un egreso del
+                // cierre actual. Si seguía abierta, basta con excluir la venta.
+                if (sale.reconciliationId) {
+                    const refundAmount = Math.abs(Number(sale.actualPaidAmount ?? sale.totalAmount ?? 0));
+                    const refundRate = sale.bcvRateAtTime ?? 1;
+                    const refundInMethod = refundMethod === 'Efectivo USD' || refundMethod === 'USDT / Crypto'
+                        ? -refundAmount
+                        : -refundAmount * refundRate;
+                    const refundSaleId = `RFD-${Date.now()}`;
+                    const refundSaleData = {
+                        id: refundSaleId,
+                        items: [],
+                        subtotal: -refundAmount,
+                        discount: 0,
+                        totalAmount: -refundAmount,
+                        costPrice: 0,
+                        paymentMethod: refundMethod,
+                        transactionDate: refundedAt,
+                        status: 'completed' as const,
+                        payments: [{ method: refundMethod, amount: refundInMethod }],
+                        actualPaidAmount: -refundAmount,
+                        changeGiven: [],
+                        totalChangeInUSD: 0,
+                        refundOfSaleId: sale.id,
+                        isRefund: true,
+                        refundReason,
+                        bcvRateAtTime: refundRate,
+                    };
+                    transaction.set(doc(firestore, 'users', user.uid, 'sale_transactions', refundSaleId), refundSaleData);
+                    refundSaleForCache = refundSaleData;
+                }
 
                 // Fase 1: revertir la venta en los agregados (0 lecturas).
                 try {
@@ -217,6 +265,32 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
             };
             updateCachedItem(sale.id!, refundPatch);
             queryCache.patchItem(user.uid, 'sale_transactions', sale.id!, refundPatch);
+
+            // Reflejar la devolución de stock en inventario/POS sin recargar.
+            for (const product of productCachePatches) {
+                const { id, ...stockPatch } = product;
+                updateCachedItem(id, stockPatch);
+                queryCache.patchItem(user.uid, 'products', id, stockPatch);
+            }
+
+            // La reparación vuelve a Pendiente y sin pago.
+            if (refundedRepairId) {
+                const repairPatch = {
+                    status: 'Pendiente' as const,
+                    isPaid: false,
+                    amountPaid: 0,
+                    partsConsumed: false,
+                };
+                updateCachedItem(refundedRepairId, repairPatch);
+                queryCache.patchItem(user.uid, 'repair_jobs', refundedRepairId, repairPatch);
+            }
+
+            // Añadir el movimiento negativo a la lista/cierre sin recargar.
+            if (refundSaleForCache) {
+                addItemToCache('sale_transactions', refundSaleForCache);
+                queryCache.mergeIntoCatalog(user.uid, 'sale_transactions', [refundSaleForCache as unknown as WithId<Sale>]);
+            }
+
             invalidateStatsRange(user.uid);
 
             toast({ title: "Reembolso Procesado" });
@@ -417,6 +491,7 @@ export function TransactionList({ sales, isLoading, hasMore, isLoadingMore, onLo
                                         </div>
                                         <div className="flex items-center gap-4">
                                             {sale.status === 'refunded' && <Badge variant="destructive" className="text-[10px] font-black uppercase">REEMBOLSADO</Badge>}
+                                            {sale.isRefund && <Badge variant="outline" className="text-[10px] font-black uppercase border-amber-300 text-amber-700 bg-amber-50">DEVOLUCIÓN</Badge>}
                                             {sale.reconciliationId && (
                                                 <Badge variant="outline" className="text-[9px] font-black uppercase border-green-600 text-green-600 bg-green-50/50 flex items-center gap-1">
                                                     <CheckCircle2 className="w-2.5 h-2.5" /> Cerrada

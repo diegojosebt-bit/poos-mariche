@@ -3,7 +3,7 @@
 import { useCurrency } from "@/hooks/use-currency";
 import { Loader2, TrendingUp, RefreshCw, RotateCcw, Wifi, WifiOff, Download, LogOut } from "lucide-react";
 import { Button } from "../ui/button";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useFirebase, setDocumentNonBlocking } from "@/firebase";
 import { doc } from "firebase/firestore";
 import type { AppSettings } from "@/lib/types";
@@ -21,6 +21,40 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+const VENEZUELA_OFFSET_MS = 4 * 60 * 60 * 1000;
+const BCV_SYNC_HOURS = [7, 15, 20];
+
+function getVenezuelaDayParts(now: number) {
+    const local = new Date(now - VENEZUELA_OFFSET_MS);
+    return {
+        year: local.getUTCFullYear(),
+        month: local.getUTCMonth(),
+        day: local.getUTCDate(),
+    };
+}
+
+/** Próxima ejecución: 7:00, 15:00 o 20:00 hora Venezuela. */
+function getNextBcvSyncAt(now = Date.now()): number {
+    const { year, month, day } = getVenezuelaDayParts(now);
+    const todaySlots = BCV_SYNC_HOURS.map(
+        (hour) => Date.UTC(year, month, day, hour) + VENEZUELA_OFFSET_MS,
+    );
+    const nextToday = todaySlots.find((slot) => slot > now);
+    return nextToday ?? Date.UTC(year, month, day + 1, 7) + VENEZUELA_OFFSET_MS;
+}
+
+/** Última ejecución que ya debería haber ocurrido. */
+function getLastBcvSlot(now = Date.now()): number {
+    const { year, month, day } = getVenezuelaDayParts(now);
+    const todaySlots = BCV_SYNC_HOURS.map(
+        (hour) => Date.UTC(year, month, day, hour) + VENEZUELA_OFFSET_MS,
+    );
+    const passed = todaySlots.filter((slot) => slot <= now);
+    return passed.length > 0
+        ? passed[passed.length - 1]
+        : Date.UTC(year, month, day - 1, 20) + VENEZUELA_OFFSET_MS;
+}
 
 export function ExchangeRateReminder() {
     const { settings, isLoading, bcvRate, parallelRate } = useCurrency();
@@ -62,6 +96,70 @@ export function ExchangeRateReminder() {
             window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
         };
     }, [toast]);
+
+    // Sincronización automática: 7:00, 15:00 y 20:00 (hora Venezuela).
+    // Compara contra la tasa ya cargada en memoria; si no cambió, no escribe nada.
+    const autoSyncLastSlotRef = useRef(0);
+    useEffect(() => {
+        if (!settings?.autoUpdateBcv || !settings || !firestore || !user) return;
+
+        let cancelled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let running = false;
+
+        const syncRate = async () => {
+            if (running || cancelled || !navigator.onLine) return;
+            running = true;
+            try {
+                const response = await fetch(`/api/bcv-rate?t=${Date.now()}`, { cache: "no-store" });
+                if (!response.ok) return;
+                const data = await response.json();
+                if (typeof data?.bcvRate !== "number" || data.bcvRate <= 0) return;
+
+                const currentRate = Number(settings.bcvRate || 0);
+                const liveRate = parseFloat(data.bcvRate.toFixed(4));
+                if (currentRate > 0 && Math.abs(liveRate - currentRate) < 0.00005) {
+                    return; // Sin cambios: 0 escrituras y 0 lecturas de Firestore.
+                }
+
+                const settingsRef = doc(firestore, "users", user.uid, "app-settings", "main");
+                await setDocumentNonBlocking(settingsRef, {
+                    bcvRate: liveRate,
+                    lastUpdated: new Date().toISOString(),
+                }, { merge: true });
+            } catch {
+                // Sin conexión o API caída: se reintenta en el próximo horario.
+            } finally {
+                running = false;
+            }
+        };
+
+        const scheduleNext = () => {
+            if (cancelled) return;
+            const delay = Math.max(1_000, getNextBcvSyncAt() - Date.now());
+            timer = setTimeout(async () => {
+                await syncRate();
+                scheduleNext();
+            }, delay);
+        };
+
+        // Recupera una ejecución perdida si la app estaba cerrada a esa hora.
+        const lastSlot = getLastBcvSlot();
+        const lastUpdated = settings.lastUpdated ? new Date(settings.lastUpdated).getTime() : 0;
+        if (
+            lastSlot > autoSyncLastSlotRef.current &&
+            (!lastUpdated || lastUpdated < lastSlot)
+        ) {
+            autoSyncLastSlotRef.current = lastSlot;
+            void syncRate();
+        }
+
+        scheduleNext();
+        return () => {
+            cancelled = true;
+            if (timer) clearTimeout(timer);
+        };
+    }, [settings?.autoUpdateBcv, settings?.bcvRate, settings?.lastUpdated, firestore, user?.uid]);
 
     // Manual reload only when requested by the user clicking the icon button
     const handleReloadRate = async () => {

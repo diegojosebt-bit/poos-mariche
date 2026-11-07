@@ -426,6 +426,7 @@ function AdminContent() {
     const { toast } = useToast();
     const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
     const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+    const [isSyncing, setIsSyncing] = useState(false);
 
     // GATILLO DE SEGURIDAD Y CACHE (0 Lecturas al navegar gracias al useCollection global)
     const usersCollection = useMemoFirebase(() => 
@@ -447,6 +448,27 @@ function AdminContent() {
         const fiveMinsAgo = subMinutes(new Date(), 5);
         return users.filter(u => u.updatedAt && isAfter(parseISO(u.updatedAt), fiveMinsAgo)).length;
     }, [users]);
+
+    const handleSyncUsers = async () => {
+        if (isSyncing) return;
+        if (!ensureOnline(toast, 'Sincronizar negocios')) return;
+        setIsSyncing(true);
+        try {
+            await refetch();
+            toast({
+                title: "Panel sincronizado",
+                description: "La lista de negocios se actualizó desde Firestore.",
+            });
+        } catch {
+            toast({
+                variant: "destructive",
+                title: "No se pudo sincronizar",
+                description: "Revisa la conexión o los permisos de administrador.",
+            });
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     const handleUpdateUser = (userId: string, data: Partial<UserProfile>) => {
         if (!firestore) return;
@@ -504,11 +526,12 @@ function AdminContent() {
                 <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => { void refetch(); }}
-                    disabled={isLoading}
+                    onClick={() => { void handleSyncUsers(); }}
+                    disabled={isSyncing}
+                    title="Vuelve a leer la lista real de negocios desde Firestore"
                 >
-                    <RefreshCw className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
-                    Sincronizar
+                    <RefreshCw className={cn("w-4 h-4 mr-2", isSyncing && "animate-spin")} />
+                    {isSyncing ? "Sincronizando..." : "Sincronizar"}
                 </Button>
             </PageHeader>
             <main className="flex-1 p-4 sm:p-6 space-y-6 max-w-7xl mx-auto w-full">

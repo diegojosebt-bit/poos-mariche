@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import type { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
@@ -21,6 +22,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FilterFn } from "@tanstack/react-table";
 import { SecurityGate } from "@/components/security-gate";
 import { useDashboardStore } from "@/contexts/dashboard-context";
+import { useDraftModals } from "@/contexts/draft-modals-context";
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { useServerSearch } from '@/lib/firestore/use-server-search';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
@@ -41,7 +43,7 @@ const repairFilterFn: FilterFn<RepairJob> = (row, columnId, value) => {
     );
 };
 
-type StatusFilter = 'all' | 'unpaid' | 'undelivered' | 'warranty';
+type StatusFilter = 'all' | 'unpaid' | 'undelivered' | 'warranty' | 'deleted';
 
 export default function RepairsPage() {
     return (
@@ -58,6 +60,46 @@ function RepairsContent() {
     const usePaged = useFeatureFlag(profile, 'pagedData');
     const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const { drafts, saveDraft, clearDraft, setFormOpen } = useDraftModals();
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const [restoreDraftOpen, setRestoreDraftOpen] = useState(false);
+    const [createOpen, setCreateOpen] = useState(false);
+    const handledRestoreRef = useRef<string | null>(null);
+    const keepDraftRef = useRef(false);
+
+    useEffect(() => {
+        setFormOpen(createOpen || restoreDraftOpen);
+    }, [createOpen, restoreDraftOpen, setFormOpen]);
+
+    useEffect(() => () => setFormOpen(false), [setFormOpen]);
+
+    const handleRepairMinimize = (values: any) => {
+        keepDraftRef.current = true;
+        saveDraft('repair', values);
+    };
+
+    const handleRepairOpenChange = (open: boolean, setOpen: (value: boolean) => void) => {
+        setOpen(open);
+        if (!open) {
+            if (!keepDraftRef.current) clearDraft('repair');
+            keepDraftRef.current = false;
+        }
+    };
+
+    const restoreToken = searchParams.get('restoreDraft') === 'repair'
+        ? (searchParams.get('t') || 'legacy')
+        : null;
+
+    useEffect(() => {
+        if (!restoreToken || !drafts.repair) return;
+        if (handledRestoreRef.current === restoreToken) return;
+
+        handledRestoreRef.current = restoreToken;
+        setRestoreDraftOpen(true);
+        // Limpiar la URL sin permitir que el efecto vuelva a abrir el modal.
+        router.replace('/dashboard/repairs', { scroll: false });
+    }, [restoreToken, drafts.repair, router]);
 
     // LEGACY (bandera apagada): 100 registros recientes, como hasta ahora.
     const repairJobsQuery = useMemoFirebase(() =>
@@ -138,6 +180,12 @@ function RepairsContent() {
             temp = temp.filter(job => job.createdAt && isWithinInterval(new Date(job.createdAt), { start: from, end: to }));
         }
 
+        if (statusFilter === 'deleted') {
+            temp = temp.filter(job => job.isDeleted === true);
+        } else {
+            temp = temp.filter(job => job.isDeleted !== true);
+        }
+
         if (statusFilter === 'unpaid') {
             temp = temp.filter(job => !job.isPaid);
         } else if (statusFilter === 'undelivered') {
@@ -167,17 +215,25 @@ function RepairsContent() {
     return (
         <>
             <PageHeader title="Reparaciones">
-                <RepairFormDialog onSaved={handleOptimisticUpdate}>
-                    <Button size="sm" className="sm:h-10 px-2 sm:px-4"><PlusCircle className="mr-2 h-4 w-4" /> <span className="hidden sm:inline">Registrar</span> Reparación</Button>
-                </RepairFormDialog>
+                <Button
+                    size="sm"
+                    className="sm:h-10 px-2 sm:px-4"
+                    onClick={() => {
+                        if (drafts.repair) setRestoreDraftOpen(true);
+                        else setCreateOpen(true);
+                    }}
+                >
+                    <PlusCircle className="mr-2 h-4 w-4" /> <span className="hidden sm:inline">Registrar</span> Reparación
+                </Button>
             </PageHeader>
             <main className="flex-1 p-2 sm:p-6 space-y-4 max-w-7xl mx-auto w-full">
                 <Tabs value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)} className="w-full">
-                    <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto p-1 bg-muted/50">
+                    <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 h-auto p-1 bg-muted/50">
                         <TabsTrigger value="all" className="text-[10px] sm:text-sm py-2">Todas</TabsTrigger>
                         <TabsTrigger value="unpaid" className="text-[10px] sm:text-sm py-2 text-destructive font-bold">Por Cobrar</TabsTrigger>
                         <TabsTrigger value="undelivered" className="text-[10px] sm:text-sm py-2 text-amber-600 font-bold">Por Entregar</TabsTrigger>
                         <TabsTrigger value="warranty" className="text-[10px] sm:text-sm py-2 text-blue-600 font-bold">Garantía</TabsTrigger>
+                        <TabsTrigger value="deleted" className="text-[10px] sm:text-sm py-2 text-muted-foreground font-bold">Eliminadas</TabsTrigger>
                     </TabsList>
                 </Tabs>
 
@@ -186,6 +242,7 @@ function RepairsContent() {
                     data={filteredRepairJobs || []}
                     isLoading={isLoading}
                     filterPlaceholder="Buscar cliente o equipo..."
+                    rowClassName={(job) => job.isDeleted ? "opacity-60 line-through" : ""}
                     globalFilterFn={repairFilterFn}
                     onGlobalFilterChange={handleSearchChange}
                     isServerSearching={usePaged && serverSearchFlag && serverSearch.isSearching}
@@ -247,6 +304,26 @@ function RepairsContent() {
                         onSaved={handleOptimisticUpdate} 
                     />
                 )}
+                {drafts.repair && (
+                    <RepairFormDialog
+                        isOpen={restoreDraftOpen}
+                        onOpenChange={(open) => handleRepairOpenChange(open, setRestoreDraftOpen)}
+                        initialDraft={drafts.repair.values as any}
+                        onMinimize={handleRepairMinimize}
+                        onSaved={(job) => {
+                            handleOptimisticUpdate(job);
+                            clearDraft('repair');
+                            setRestoreDraftOpen(false);
+                        }}
+                    />
+                )}
+
+                <RepairFormDialog
+                    isOpen={createOpen}
+                    onOpenChange={(open) => handleRepairOpenChange(open, setCreateOpen)}
+                    onSaved={handleOptimisticUpdate}
+                    onMinimize={handleRepairMinimize}
+                />
             </main>
         </>
     )

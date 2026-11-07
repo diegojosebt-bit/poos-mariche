@@ -116,12 +116,12 @@ export function SidebarNav() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="p-3 group-data-[collapsible=icon]:p-2">
-        <div className="flex items-center justify-between gap-2">
+      <SidebarHeader className="flex h-16 shrink-0 flex-row items-center border-b border-sidebar-border/60 px-3 py-0 group-data-[collapsible=icon]:px-2">
+        <div className="flex h-full w-full items-center justify-between gap-2 group-data-[collapsible=icon]:gap-0">
           <Link
             href="/dashboard/pos"
             scroll={false}
-            className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden"
+            className="flex min-w-0 items-center gap-2 overflow-hidden opacity-100 transition-[width,opacity] duration-200 ease-out group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:opacity-0"
           >
               <BrandLockup size="sm" className="text-sidebar-foreground" />
           </Link>
@@ -140,7 +140,7 @@ export function SidebarNav() {
           </Button>
         </div>
       </SidebarHeader>
-      <SidebarContent className="group-data-[collapsible=icon]:px-2">
+      <SidebarContent className="mt-2 transition-[padding] duration-200 ease-out group-data-[collapsible=icon]:px-2">
         <SidebarMenu>
           {filteredNavItems.map((item) => (
             <SidebarMenuItem key={item.href}>

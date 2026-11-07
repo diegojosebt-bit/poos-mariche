@@ -26,12 +26,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Product, ComboItem, UserProfile, ProductUnit } from "@/lib/types";
-import { useState, type ReactNode, useEffect, useMemo } from "react";
+import { useState, type ReactNode, useEffect, useMemo, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useFirebase, setDocumentNonBlocking, useCollection, useMemoFirebase, useDoc } from "@/firebase";
 import { useDashboardStore } from "@/contexts/dashboard-context";
+import { persistDraft } from "@/contexts/draft-modals-context";
 import { doc, collection, arrayUnion, query, limit } from "firebase/firestore";
-import { Check, ChevronsUpDown, Calculator, Smartphone, Barcode, Tag, Scale, Lock, Percent, Landmark, Gift, BadgePercent, Sparkles, RefreshCcw, Loader2 } from "lucide-react";
+import { Check, ChevronDown, Calculator, Smartphone, Barcode, Tag, Scale, Lock, Percent, Landmark, Gift, BadgePercent, Sparkles, RefreshCcw, Loader2, Minimize2 } from "lucide-react";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -83,6 +84,8 @@ interface ProductFormDialogProps {
     isOpen?: boolean;
     onOpenChange?: (open: boolean) => void;
     onSaved?: (product: Product) => void;
+    initialDraft?: Partial<ProductFormData>;
+    onMinimize?: (values: ProductFormData) => void;
 }
 
 function generateSearchKeywords(name: string, sku: string, category: string, models: string[]) {
@@ -101,10 +104,11 @@ function generateSearchKeywords(name: string, sku: string, category: string, mod
     return Array.from(keywords);
 }
 
-export function ProductFormDialog({ product, children, productCount = 0, isOpen, onOpenChange, onSaved }: ProductFormDialogProps) {
+export function ProductFormDialog({ product, children, productCount = 0, isOpen, onOpenChange, onSaved, initialDraft, onMinimize }: ProductFormDialogProps) {
   const { firestore, user } = useFirebase();
   const [internalOpen, setInternalOpen] = useState(false);
   const [categoryPopoverOpen, setCategoryPopoverOpen] = useState(false);
+  const categoryPickerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { getDynamicPrice, convert, format: formatCurrency, profitMargin, bcvRate, parallelRate, getFinalPrice } = useCurrency();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -130,8 +134,7 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
   }, [inventorySettings]);
 
   const form = useForm<ProductFormData>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
+    resolver: zodResolver(formSchema),    defaultValues: {
       name: "",
       category: "GENERAL",
       sku: "",
@@ -158,6 +161,26 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
       salesCount: 0,
     },
   });
+
+  useEffect(() => {
+    if (!categoryPopoverOpen) return;
+
+    const closeOnOutside = (event: PointerEvent) => {
+      if (categoryPickerRef.current && !categoryPickerRef.current.contains(event.target as Node)) {
+        setCategoryPopoverOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCategoryPopoverOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [categoryPopoverOpen]);
 
   const costPrice = form.watch("costPrice");
   const isFixedPrice = form.watch("isFixedPrice");
@@ -202,10 +225,11 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                 compatibleModels: "", isCombo: false, comboItems: [], isGiftable: false, hasIVA: false,
                 createdAt: new Date().toISOString().split('T')[0],
                 salesCount: 0,
-            });
+                ...(initialDraft || {}),
+            } as any);
         }
     }
-  }, [product, form, open]);
+  }, [product, form, open, initialDraft]);
 
   useEffect(() => {
     if (!isFixedPrice && suggestedRetailPrice > 0) {
@@ -270,6 +294,15 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
         className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto flex flex-col p-0"
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
+        onMinimize={!product && onMinimize ? () => {
+          const values = form.getValues();
+          persistDraft('product', values);
+          try {
+            onMinimize(values);
+          } finally {
+            setOpen(false);
+          }
+        } : undefined}
       >
         <div className="p-4 sm:p-6 pb-2">
             <DialogHeader>
@@ -292,21 +325,47 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                 <FormField control={form.control} name="category" render={({ field }) => (
                     <FormItem>
                         <FormLabel className="flex items-center gap-2 text-[10px] font-bold uppercase"><Tag className="w-3" /> Categoría</FormLabel>
-                        <div className="flex gap-2">
+                        <div ref={categoryPickerRef} className="relative flex gap-2">
                             <FormControl><Input {...field} onChange={(e) => field.onChange(e.target.value.toUpperCase())} className="uppercase h-10" /></FormControl>
-                            <Popover open={categoryPopoverOpen} onOpenChange={setCategoryPopoverOpen}>
-                                <PopoverTrigger asChild><Button type="button" variant="outline" size="icon" className="h-10 w-10"><ChevronsUpDown className="h-4 w-4 opacity-50" /></Button></PopoverTrigger>
-                                <PopoverContent className="w-[200px] p-0" align="end">
-                                    <Command><CommandInput placeholder="Buscar..." /><CommandList><CommandEmpty>Sin resultados.</CommandEmpty><CommandGroup>
-                                        {categories.map((cat) => (
-                                            <CommandItem key={cat} value={cat} onSelect={() => { form.setValue("category", cat.toUpperCase()); setCategoryPopoverOpen(false); }}>
-                                                <Check className={cn("mr-2 h-4 w-4", cat.toUpperCase() === field.value.toUpperCase() ? "opacity-100" : "opacity-0")} />
-                                                {cat.toUpperCase()}
-                                            </CommandItem>
-                                        ))}
-                                    </CommandGroup></CommandList></Command>
-                                </PopoverContent>
-                            </Popover>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-10 w-10 shrink-0"
+                                onClick={() => setCategoryPopoverOpen((prev) => !prev)}
+                                aria-label="Ver categorías"
+                            >
+                                <ChevronDown className={cn("h-4 w-4 opacity-60 transition-transform", categoryPopoverOpen && "rotate-180")} />
+                            </Button>
+                            {categoryPopoverOpen && (
+                                <div className="absolute right-0 top-12 z-[200] w-[210px] rounded-lg border bg-white p-1 shadow-xl">
+                                    <p className="px-2 py-1 text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                                        Categorías
+                                    </p>
+                                    <div className="max-h-52 overflow-y-auto">
+                                        {categories.map((cat) => {
+                                            const selected = cat.toUpperCase() === String(field.value || '').toUpperCase();
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    key={cat}
+                                                    onClick={() => {
+                                                        field.onChange(cat.toUpperCase());
+                                                        setCategoryPopoverOpen(false);
+                                                    }}
+                                                    className={cn(
+                                                        "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-bold uppercase transition-colors hover:bg-muted",
+                                                        selected && "bg-primary/5 text-primary",
+                                                    )}
+                                                >
+                                                    <Check className={cn("h-3.5 w-3.5 shrink-0", selected ? "opacity-100" : "opacity-0")} />
+                                                    <span className="truncate">{cat.toUpperCase()}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </FormItem>
                 )} />

@@ -130,7 +130,7 @@ export function OfflineSyncPill() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
       {justSynced ? (
         <div className="flex items-center gap-2 bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg border border-emerald-500">
           <CheckCircle2 className="w-4 h-4" />

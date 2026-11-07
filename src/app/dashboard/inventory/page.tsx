@@ -1,6 +1,7 @@
 "use client";
 
-import React, { Suspense, useState, useMemo, useCallback } from 'react';
+import React, { Suspense, useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { PlusCircle, Trash2, Calculator, Clock, RefreshCw, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
@@ -10,6 +11,7 @@ import type { Product } from '@/lib/types';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCollection, useFirebase, useMemoFirebase } from '@/firebase';
 import { useDashboardStore } from '@/contexts/dashboard-context';
+import { useDraftModals } from '@/contexts/draft-modals-context';
 import { usePagedQuery } from '@/lib/firestore/use-paged-query';
 import { useServerSearch } from '@/lib/firestore/use-server-search';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
@@ -121,7 +123,47 @@ function InventoryContent() {
     const { toast } = useToast();
     
     const { profile } = useDashboardStore();
+    const { drafts, saveDraft, clearDraft, setFormOpen } = useDraftModals();
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const [restoreDraftOpen, setRestoreDraftOpen] = useState(false);
+    const [createOpen, setCreateOpen] = useState(false);
+    const handledRestoreRef = useRef<string | null>(null);
+    const keepDraftRef = useRef(false);
     const uid = user?.uid ?? '';
+
+    useEffect(() => {
+        setFormOpen(createOpen || restoreDraftOpen);
+    }, [createOpen, restoreDraftOpen, setFormOpen]);
+
+    useEffect(() => () => setFormOpen(false), [setFormOpen]);
+
+    const handleProductMinimize = (values: any) => {
+        keepDraftRef.current = true;
+        saveDraft('product', values);
+    };
+
+    const handleProductOpenChange = (open: boolean, setOpen: (value: boolean) => void) => {
+        setOpen(open);
+        if (!open) {
+            if (!keepDraftRef.current) clearDraft('product');
+            keepDraftRef.current = false;
+        }
+    };
+
+    const restoreToken = searchParams.get('restoreDraft') === 'product'
+        ? (searchParams.get('t') || 'legacy')
+        : null;
+
+    useEffect(() => {
+        if (!restoreToken || !drafts.product) return;
+        if (handledRestoreRef.current === restoreToken) return;
+
+        handledRestoreRef.current = restoreToken;
+        setRestoreDraftOpen(true);
+        // Limpiar la URL sin permitir que el efecto vuelva a abrir el modal.
+        router.replace('/dashboard/inventory', { scroll: false });
+    }, [restoreToken, drafts.product, router]);
     const usePaged = useFeatureFlag(profile, 'pagedData');
 
     // LEGACY (bandera apagada): catálogo completo, como hasta ahora.
@@ -258,9 +300,16 @@ function InventoryContent() {
         <>
             <PageHeader title="Inventario">
                 <PriceCalculatorDialog><Button variant="outline" size="icon" className="h-9 w-9 sm:h-10 sm:w-10"><Calculator className="h-4 w-4" /></Button></PriceCalculatorDialog>
-                <ProductFormDialog productCount={products?.length || 0} onSaved={handleOptimisticUpdate}>
-                    <Button size="sm" className="sm:h-10 px-2 sm:px-4"><PlusCircle className="mr-2 h-4 w-4" /> <span className="hidden sm:inline">Añadir</span> Producto</Button>
-                </ProductFormDialog>
+                <Button
+                    size="sm"
+                    className="sm:h-10 px-2 sm:px-4"
+                    onClick={() => {
+                        if (drafts.product) setRestoreDraftOpen(true);
+                        else setCreateOpen(true);
+                    }}
+                >
+                    <PlusCircle className="mr-2 h-4 w-4" /> <span className="hidden sm:inline">Añadir</span> Producto
+                </Button>
             </PageHeader>
             <main className="flex-1 p-2 sm:p-6 max-w-7xl mx-auto w-full">
                 <Tabs value={stockFilter} onValueChange={(v) => setStockFilter(v as any)} className="mb-4">
@@ -401,6 +450,26 @@ function InventoryContent() {
                         onSaved={handleOptimisticUpdate}
                     />
                 )}
+                {drafts.product && (
+                    <ProductFormDialog
+                        isOpen={restoreDraftOpen}
+                        onOpenChange={(open) => handleProductOpenChange(open, setRestoreDraftOpen)}
+                        initialDraft={drafts.product.values as any}
+                        onMinimize={handleProductMinimize}
+                        onSaved={(saved) => {
+                            handleOptimisticUpdate(saved);
+                            clearDraft('product');
+                            setRestoreDraftOpen(false);
+                        }}
+                    />
+                )}
+
+                <ProductFormDialog
+                    isOpen={createOpen}
+                    onOpenChange={(open) => handleProductOpenChange(open, setCreateOpen)}
+                    onSaved={handleOptimisticUpdate}
+                    onMinimize={handleProductMinimize}
+                />
             </main>
         </>
     );

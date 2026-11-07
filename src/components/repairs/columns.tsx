@@ -35,6 +35,7 @@ import { useFirebase, useDoc, useMemoFirebase, useCollection } from "@/firebase"
 import { doc, runTransaction, type DocumentSnapshot, collection, query, where, getDoc } from "firebase/firestore"
 import { handlePrintAllTickets, handlePrintCustomerTicket, handlePrintInternalTicket, handlePrintStickerTicket } from "./repair-ticket"
 import { AdminAuthDialog } from "../admin-auth-dialog"
+import { Input } from "../ui/input"
 import { useState, type ReactNode, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
@@ -184,6 +185,7 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
     const { removeCachedItem, updateCachedItem, profile } = useDashboardStore();
     const router = useRouter();
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [deleteReason, setDeleteReason] = useState("");
     const [isDeliverDialogOpen, setIsDeliverDialogOpen] = useState(false);
     const [isDelivering, setIsDelivering] = useState(false);
     const { bcvRate, parallelRate } = useCurrency();
@@ -303,7 +305,18 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
     const handleDelete = async () => {
         if (!firestore || !repairJob.id || !user) return;
         if (!ensureOnline(toast, 'Eliminar reparación')) return;
+        if (!deleteReason.trim()) {
+            toast({ variant: 'destructive', title: 'Motivo requerido', description: 'Indica por qué se elimina la reparación.' });
+            return;
+        }
         const jobId = repairJob.id;
+        const deletedPatch = {
+            isDeleted: true,
+            deletedAt: new Date().toISOString(),
+            deletedBy: user.uid,
+            deletionReason: deleteReason.trim(),
+            updatedAt: new Date().toISOString(),
+        };
         
         try {
             await runTransaction(firestore, async (transaction) => {
@@ -349,15 +362,15 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                     }
                 }
                 
-                transaction.delete(jobRef);
+                transaction.update(jobRef, deletedPatch);
             });
 
-            // Limpiar AMBAS cachés: la legacy (dataCache) y la paginada (queryCache).
-            // Sin esto el documento se borra en Firestore pero la fila sigue visible.
-            removeCachedItem(jobId);
-            queryCache.removeItem(user.uid, 'repair_jobs', jobId);
+            // Soft delete: conservar el documento y reflejarlo en ambas cachés.
+            updateCachedItem(jobId, deletedPatch);
+            queryCache.patchItem(user.uid, 'repair_jobs', jobId, deletedPatch);
+            setDeleteReason("");
 
-            toast({ title: "Trabajo Eliminado", variant: "destructive" });
+            toast({ title: "Reparación eliminada", description: "Se conserva el historial del cliente." });
         } catch (error: any) {
              toast({ title: "Error", description: "No se pudo eliminar.", variant: "destructive" });
         } finally {
@@ -387,6 +400,24 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
         handlePrintStickerTicket({ repairJob, businessName: profile?.businessName, profile, bcvRate, parallelRate }, (error) => {
             toast({ variant: "destructive", title: "Error", description: error })
         });
+    }
+
+    if (repairJob.isDeleted) {
+        return (
+            <div className="flex flex-col items-end gap-1">
+                <Badge variant="outline" className="border-destructive/30 text-[9px] font-black uppercase text-destructive line-through">
+                    Eliminada
+                </Badge>
+                {repairJob.deletionReason && (
+                    <span
+                        className="max-w-[170px] truncate text-[9px] text-muted-foreground"
+                        title={repairJob.deletionReason}
+                    >
+                        Motivo: {repairJob.deletionReason}
+                    </span>
+                )}
+            </div>
+        );
     }
 
     return (
@@ -497,14 +528,32 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                 </AlertDialogContent>
             </AlertDialog>
 
-            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={(open) => {
+                setIsDeleteDialogOpen(open);
+                if (!open) setDeleteReason("");
+            }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                     <AlertDialogTitle>¿Eliminar este trabajo?</AlertDialogTitle>
                     </AlertDialogHeader>
+                    <div className="space-y-2 py-2">
+                        <p className="text-[10px] font-black uppercase text-muted-foreground">
+                            Motivo de la eliminación
+                        </p>
+                        <Input
+                            value={deleteReason}
+                            onChange={(event) => setDeleteReason(event.target.value)}
+                            placeholder="Ej: el cliente canceló, orden duplicada..."
+                            maxLength={160}
+                            autoFocus
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                            La reparación quedará tachada y conservará los datos del cliente.
+                        </p>
+                    </div>
                     <AlertDialogFooter>
                     <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDelete} className="bg-destructive">Eliminar</AlertDialogAction>
+                    <AlertDialogAction onClick={handleDelete} disabled={!deleteReason.trim()} className="bg-destructive">Eliminar</AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>

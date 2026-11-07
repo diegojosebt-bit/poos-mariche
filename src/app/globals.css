@@ -76,6 +76,10 @@
   * {
     @apply border-border;
   }
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;
@@ -125,26 +129,29 @@
 }
 
 .mm-splash-stroke {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
   opacity: 0;
+  will-change: stroke-dashoffset, opacity;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .mm-splash-m {
   animation:
-    mm-splash-draw 0.9s cubic-bezier(0.65, 0, 0.35, 1) 0.1s forwards,
-    mm-splash-show 0.01s linear 0.1s forwards;
+    mm-splash-draw 1.05s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards,
+    mm-splash-show 0.2s ease-out 0.1s forwards;
 }
 
 .mm-splash-p {
   animation:
-    mm-splash-draw 0.75s cubic-bezier(0.65, 0, 0.35, 1) 1s forwards,
-    mm-splash-show 0.01s linear 1s forwards;
+    mm-splash-draw 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.95s forwards,
+    mm-splash-show 0.2s ease-out 0.95s forwards;
 }
 
 .mm-splash-word {
   opacity: 0;
-  animation: mm-splash-fade 0.45s ease-out 1.75s forwards;
+  animation: mm-splash-fade 0.5s cubic-bezier(0.22, 1, 0.36, 1) 1.8s forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
