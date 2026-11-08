@@ -596,7 +596,7 @@ export function ExportRepairsDialog({ repairs: initialRepairs }: ExportRepairsDi
             size="sm" 
             onClick={handleExport} 
             disabled={isExporting || filteredData.length === 0}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5 shadow-sm"
+            className="bg-emerald-600 hover:bg-[#008f39] text-white font-bold gap-1.5 shadow-sm"
           >
             {isExporting ? (
               <>

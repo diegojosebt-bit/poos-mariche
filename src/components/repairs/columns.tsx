@@ -520,7 +520,7 @@ const ActionsCell = ({ repairJob, table }: { repairJob: RepairJob, table: any })
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel disabled={isDelivering}>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleDeliverConfirm} disabled={isDelivering} className="bg-green-600 hover:bg-green-700 text-white font-bold">
+                        <AlertDialogAction onClick={handleDeliverConfirm} disabled={isDelivering} className="bg-green-600 hover:bg-[#008f39] text-white font-bold">
                             {isDelivering ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                             Confirmar Entrega
                         </AlertDialogAction>

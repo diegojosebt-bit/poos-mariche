@@ -222,7 +222,7 @@ export function ExchangeRateReminder() {
                     <Button 
                         variant="ghost" 
                         size="icon" 
-                        className="h-8 w-8 text-primary hover:bg-primary/10 shrink-0 border border-primary/10" 
+                        className="h-8 w-8 text-primary hover:bg-primary/10 hover:text-primary shrink-0 border border-primary/10" 
                         onClick={() => window.location.reload()}
                         title="Actualizar aplicación"
                     >
@@ -260,7 +260,7 @@ export function ExchangeRateReminder() {
                             size="icon" 
                             onClick={handleReloadRate}
                             disabled={isUpdating}
-                            className="h-7 w-7 text-primary hover:bg-primary/10 shrink-0 border border-primary/10 rounded-full ml-1"
+                            className="h-7 w-7 text-primary hover:bg-primary/10 hover:text-primary shrink-0 border border-primary/10 rounded-full ml-1"
                             title="Recargar tasa oficial BCV"
                         >
                             <RefreshCw className={cn("w-3.5 h-3.5", isUpdating && "animate-spin")} />

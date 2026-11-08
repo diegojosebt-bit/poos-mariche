@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import type { RepairJob, RepairStatus, Product, UserProfile, ReservedPart, AppSettings } from "@/lib/types";
-import { useState, useEffect, ReactNode, useMemo } from "react";
+import { useState, useEffect, useRef, ReactNode, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/use-currency";
 import { Label } from "../ui/label";
@@ -38,7 +38,7 @@ import { useServerSearch } from '@/lib/firestore/use-server-search';
 import { queryCache } from '@/lib/firestore/query-cache';
 import { useFeatureFlag } from '@/lib/features';
 import { normalizeText } from '@/lib/search-index';
-import { doc, runTransaction, type DocumentSnapshot, collection, query, orderBy, limit, increment, getDoc, where, getDocs } from "firebase/firestore";
+import { doc, runTransaction, type DocumentSnapshot, collection, query, orderBy, limit, increment, getDoc, where, getDocs, getDocsFromCache } from "firebase/firestore";
 import { handlePrintAllTickets } from "./repair-ticket";
 import { User, Smartphone, Package, Search, Plus, Trash2, Loader2, DollarSign, Calculator, UserCheck, Hammer, TicketPercent, Landmark, X, Minimize2 } from "lucide-react";
 import { format, addDays } from "date-fns";
@@ -236,6 +236,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [lookedUpCustomer, setLookedUpCustomer] = useState<any>(null);
+  const autoFilledIdRef = useRef<string>("");
 
   useEffect(() => {
     const sync = () => setIsOnline(navigator.onLine);
@@ -323,19 +324,86 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
   const watchedName = form.watch("customerName");
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchCustomer = async () => {
-      if (!open || !firestore || !user || !watchedID || watchedID.length < 5) {
+      const id = watchedID?.toUpperCase().trim() || "";
+      const digits = id.replace(/\D/g, "");
+      if (!open || !firestore || !user || id.length < 5 || digits.length < 7) {
         setLookedUpCustomer(null);
         return;
       }
-      const q = query(collection(firestore, 'users', user.uid, 'repair_jobs'), where('customerID', '==', watchedID.toUpperCase().trim()), limit(1));
-      const snap = await getDocs(q);
-      if (!snap.empty) setLookedUpCustomer(snap.docs[0].data());
-      else setLookedUpCustomer(null);
+
+      const variants = Array.from(new Set([
+        id,
+        digits,
+        `V-${digits}`,
+        `V${digits}`,
+        `E-${digits}`,
+        `J-${digits}`,
+      ].filter(Boolean))).slice(0, 10);
+
+      const findOne = async (collectionName: "repair_jobs" | "fiados") => {
+        const q = query(
+          collection(firestore, "users", user.uid, collectionName),
+          where("customerID", "in", variants),
+          limit(1),
+        );
+        try {
+          const cached = await getDocsFromCache(q);
+          if (!cached.empty) return cached.docs[0].data();
+        } catch {
+          // Sin caché disponible para esta consulta.
+        }
+        const server = await getDocs(q);
+        return server.empty ? null : server.docs[0].data();
+      };
+
+      try {
+        const repairCustomer = await findOne("repair_jobs");
+        const data = repairCustomer || await findOne("fiados");
+        if (cancelled) return;
+
+        if (!data) {
+          setLookedUpCustomer(null);
+          return;
+        }
+
+        setLookedUpCustomer(data);
+        const current = form.getValues();
+        const updates: Record<string, string> = {};
+        if (!current.customerName?.trim() && data.customerName) {
+          updates.customerName = String(data.customerName).toUpperCase();
+        }
+        if (!current.customerPhone?.trim() && data.customerPhone) {
+          updates.customerPhone = String(data.customerPhone);
+        }
+        if (!current.customerAddress?.trim() && data.customerAddress) {
+          updates.customerAddress = String(data.customerAddress).toUpperCase();
+        }
+
+        Object.entries(updates).forEach(([field, value]) => {
+          form.setValue(field as "customerName" | "customerPhone" | "customerAddress", value, {
+            shouldDirty: true,
+            shouldValidate: true,
+          });
+        });
+
+        if (Object.keys(updates).length > 0 && autoFilledIdRef.current !== id) {
+          autoFilledIdRef.current = id;
+          toast({ title: "Cliente encontrado", description: "Datos cargados automáticamente." });
+        }
+      } catch {
+        if (!cancelled) setLookedUpCustomer(null);
+      }
     };
-    const debounce = setTimeout(fetchCustomer, 600);
-    return () => clearTimeout(debounce);
-  }, [watchedID, firestore, user, open]);
+
+    const debounce = setTimeout(fetchCustomer, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(debounce);
+    };
+  }, [watchedID, firestore, user, open, form, toast]);
 
   const handleApplyCustomerData = () => {
     if (lookedUpCustomer) {
@@ -626,7 +694,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                             <FormField control={form.control} name="customerID" render={({field}) => <FormItem><FormLabel className="text-[10px] font-bold uppercase">Cédula / RIF</FormLabel><FormControl><Input {...field} onChange={(e) => field.onChange(e.target.value.toUpperCase())} placeholder="V-12345678" className="uppercase h-9" /></FormControl><FormMessage /></FormItem>} />
                             <FormField control={form.control} name="customerPhone" render={({field}) => <FormItem><FormLabel className="text-[10px] font-bold uppercase">Teléfono</FormLabel><FormControl><Input {...field} placeholder="0412-0000000" className="h-9" /></FormControl><FormMessage /></FormItem>} />
                         </div>
-                        {lookedUpCustomer && (watchedName.toUpperCase() !== lookedUpCustomer.customerName.toUpperCase()) && <Button type="button" variant="ghost" size="sm" className="h-7 text-[10px] text-blue-600 bg-blue-50 hover:bg-blue-100 flex items-center gap-1 font-bold w-full" onClick={handleApplyCustomerData}><UserCheck className="w-3.5 h-3.5" /> ¿CARGAR DATOS?</Button>}
+                        {lookedUpCustomer && (watchedName.toUpperCase() !== lookedUpCustomer.customerName.toUpperCase()) && <Button type="button" variant="ghost" size="sm" className="h-7 text-[10px] text-blue-600 bg-blue-50 flex items-center gap-1 font-bold w-full" onClick={handleApplyCustomerData}><UserCheck className="w-3.5 h-3.5" /> ¿CARGAR DATOS?</Button>}
                         <FormField control={form.control} name="customerName" render={({field}) => <FormItem><FormLabel className="text-[10px] font-bold uppercase">Nombre Completo</FormLabel><FormControl><Input {...field} onChange={(e) => field.onChange(e.target.value.toUpperCase())} placeholder="JUAN PÉREZ" className="uppercase h-9" /></FormControl><FormMessage /></FormItem>} />
                     </div>
 
@@ -644,7 +712,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                             <span className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest flex items-center gap-2"><Package className="w-3 h-3" /> Repuestos y Servicios</span>
                             <div className="flex gap-1.5">
                                 <Button type="button" variant="outline" size="sm" disabled={!isOnline} title={!isOnline ? 'Sin conexión: usa una pieza manual' : undefined} className="h-7 text-[9px] font-black px-2" onClick={() => setPartsPopoverOpen((prev) => !prev)}><Search className="w-3 h-3 mr-1" /> {isOnline ? 'INVENTARIO' : 'INVENTARIO OFF'}</Button>
-                                <Button type="button" variant="outline" size="sm" className="h-7 text-[9px] font-black px-2 border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => setManualQuickAddOpen(true)}><Plus className="w-3 h-3 mr-1" /> MANUAL (+)</Button>
+                                <Button type="button" variant="outline" size="sm" className="h-7 text-[9px] font-black px-2 border-blue-200 text-blue-700" onClick={() => setManualQuickAddOpen(true)}><Plus className="w-3 h-3 mr-1" /> MANUAL (+)</Button>
                             </div>
                         </div>
                         {partsPopoverOpen && isOnline && (

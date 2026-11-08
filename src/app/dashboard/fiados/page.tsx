@@ -290,7 +290,7 @@ function FiadosContent() {
                                             <TableCell>
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="ghost" size="sm" className="h-7 text-primary hover:bg-primary/10 gap-1.5 px-2">
+                                                        <Button variant="ghost" size="sm" className="h-7 text-primary hover:bg-primary/10 hover:text-primary gap-1.5 px-2">
                                                             <List className="h-3.5 w-3.5" />
                                                             <span className="text-[10px] font-bold">VER ({fiado.items?.length || 0})</span>
                                                         </Button>
@@ -1039,7 +1039,7 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button size="sm" variant="outline" className="h-8 text-green-600 border-green-200 hover:bg-green-50">
+                <Button size="sm" variant="outline" className="h-8 text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700">
                     <DollarSign className="w-3.5 h-3.5 mr-1" /> Abonar
                 </Button>
             </DialogTrigger>

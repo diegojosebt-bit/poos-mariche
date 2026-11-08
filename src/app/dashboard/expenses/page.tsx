@@ -344,7 +344,7 @@ function ExpensesContent() {
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <AdminAuthDialog actionType="deleteExpenses" onAuthorized={() => handleDelete(ex.id!)}>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10">
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive">
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </AdminAuthDialog>

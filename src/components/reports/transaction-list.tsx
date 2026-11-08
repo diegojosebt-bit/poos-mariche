@@ -307,7 +307,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
     return (
         <div className="flex items-center gap-2">
             <AdminAuthDialog actionType="deleteSales" onAuthorized={() => setIsConfirmOpen(true)}>
-                <Button variant="outline" size="sm" className="h-8 text-[10px] font-black uppercase border-destructive/20 text-destructive hover:bg-destructive/5"><Undo2 className="mr-1.5 h-3.5 w-3.5" /> Reembolsar</Button>
+                <Button variant="outline" size="sm" className="h-8 text-[10px] font-black uppercase border-destructive/20 text-destructive hover:bg-destructive/5 hover:text-destructive"><Undo2 className="mr-1.5 h-3.5 w-3.5" /> Reembolsar</Button>
             </AdminAuthDialog>
             <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
                 <AlertDialogContent className="sm:max-w-md">

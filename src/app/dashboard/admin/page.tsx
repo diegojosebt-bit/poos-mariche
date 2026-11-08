@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { format, parseISO, isAfter, subMinutes } from "date-fns";
+import { format, parseISO, isAfter, subMinutes, addDays } from "date-fns";
 import { es } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect, useMemo, useRef } from "react";
@@ -186,7 +186,7 @@ function AnnouncementEditor() {
                                         type="button"
                                         variant="ghost"
                                         size="icon"
-                                        className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                                        className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                         onClick={() => removeItem(item.id)}
                                         aria-label={`Eliminar aviso ${index + 1}`}
                                     >
@@ -306,6 +306,7 @@ function UserEditDialog({
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="active" className="text-green-600 font-black uppercase">Activa / Pagada</SelectItem>
+                                            <SelectItem value="pending" className="text-amber-600 font-black uppercase">Pendiente de Activación</SelectItem>
                                             <SelectItem value="trial" className="text-blue-600 font-black uppercase">Periodo de Prueba</SelectItem>
                                             <SelectItem value="expired" className="text-red-600 font-black uppercase">Suspendida / Vencida</SelectItem>
                                         </SelectContent>
@@ -365,7 +366,7 @@ function UserEditDialog({
                                     <Button 
                                         type="button" 
                                         variant="outline"
-                                        className="h-9 font-black text-[10px] border-destructive/20 text-destructive hover:bg-destructive/5 uppercase tracking-widest"
+                                        className="h-9 font-black text-[10px] border-destructive/20 text-destructive hover:bg-destructive/5 hover:text-destructive uppercase tracking-widest"
                                         onClick={() => setIsResetConfirmOpen(true)}
                                     >
                                         Borrar PIN
@@ -433,7 +434,7 @@ function AdminContent() {
         (firestore && currentUser) ? query(collection(firestore, "users"), limit(100)) : null, 
         [firestore, currentUser?.uid]
     );
-    const { data: users, isLoading, refetch } = useCollection<UserProfile>(usersCollection);
+    const { data: users, isLoading, refetch, mutate } = useCollection<UserProfile>(usersCollection);
 
     // El panel de admin necesita la lista REAL de negocios, no la copia de
     // IndexedDB: se fuerza una lectura de servidor al entrar (5–100 docs).
@@ -474,6 +475,7 @@ function AdminContent() {
         if (!firestore) return;
         const userRef = doc(firestore, 'users', userId);
         updateDocumentNonBlocking(userRef, data);
+        mutate((current) => current?.map((u) => u.uid === userId ? { ...u, ...data } : u) || []);
         toast({ title: "Cambios guardados" });
     };
 
@@ -495,6 +497,19 @@ function AdminContent() {
         toast({ title: "PIN Eliminado" });
     };
 
+    const handleQuickActivate = (target: UserProfile) => {
+        if (!firestore) return;
+        const userRef = doc(firestore, 'users', target.uid);
+        const activation = {
+            licenseStatus: 'active' as const,
+            licenseExpiry: addDays(new Date(), 30).toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        updateDocumentNonBlocking(userRef, activation);
+        mutate((current) => current?.map((u) => u.uid === target.uid ? { ...u, ...activation } : u) || []);
+        toast({ title: "Negocio activado", description: "Acceso activo por 30 días." });
+    };
+
     const handleDeleteUser = () => {
         if (!firestore || !userToDelete) return;
         if (userToDelete.uid === currentUser?.uid) {
@@ -503,6 +518,7 @@ function AdminContent() {
             return;
         }
         deleteDocumentNonBlocking(doc(firestore, 'users', userToDelete.uid));
+        mutate((current) => current?.filter((u) => u.uid !== userToDelete.uid) || []);
         toast({ title: "Cuenta Eliminada" });
         setUserToDelete(null);
     };
@@ -581,22 +597,28 @@ function AdminContent() {
                                     <TableBody>
                                         {sortedUsers.map((u) => {
                                             const isOnline = u.updatedAt && isAfter(parseISO(u.updatedAt), subMinutes(new Date(), 5));
+                                            const isPending = u.licenseStatus === 'pending';
                                             const isActuallyExpired = u.licenseStatus === 'expired' || (u.licenseExpiry && isAfter(new Date(), parseISO(u.licenseExpiry)));
 
                                             return (
-                                                <TableRow key={u.uid} className={cn("hover:bg-muted/10", isActuallyExpired && "bg-red-50/50")}>
+                                                <TableRow key={u.uid} className={cn("hover:bg-muted/10", isPending && "bg-amber-50/40", isActuallyExpired && "bg-red-50/50")}>
                                                     <TableCell>
                                                         <div className="flex items-center gap-2">
                                                             <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" : "bg-slate-300")} />
                                                             <div className="flex flex-col">
                                                                 <div className="font-black text-xs uppercase text-slate-800">{u.businessName || "SIN NOMBRE"}</div>
                                                                 <div className="text-[9px] text-muted-foreground font-medium">{u.email}</div>
+                                                                {(u.accountName || u.businessPhone) && (
+                                                                    <div className="text-[9px] text-muted-foreground font-medium">
+                                                                        {u.accountName || "Sin contacto"}{u.businessPhone ? ` · ${u.businessPhone}` : ""}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </TableCell>
                                                     <TableCell>
-                                                        <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-tighter px-1.5 py-0", !isActuallyExpired ? "bg-green-50 text-green-700 border-green-200" : "bg-red-50 text-red-700 border-red-200")}>
-                                                            {!isActuallyExpired ? 'ACTIVA' : 'SUSPENDIDA'}
+                                                        <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-tighter px-1.5 py-0", isPending ? "bg-amber-50 text-amber-700 border-amber-200" : !isActuallyExpired ? "bg-green-50 text-green-700 border-green-200" : "bg-red-50 text-red-700 border-red-200")}>
+                                                            {isPending ? 'PENDIENTE' : !isActuallyExpired ? 'ACTIVA' : 'SUSPENDIDA'}
                                                         </Badge>
                                                     </TableCell>
                                                     <TableCell className="text-[10px] font-bold text-muted-foreground uppercase">
@@ -607,6 +629,15 @@ function AdminContent() {
                                                     </TableCell>
                                                     <TableCell className="text-right">
                                                         <div className="flex justify-end gap-1">
+                                                            {isPending && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    className="h-7 text-[9px] font-black uppercase bg-green-600 hover:bg-[#008f39] text-white"
+                                                                    onClick={() => handleQuickActivate(u)}
+                                                                >
+                                                                    <CheckCircle2 className="w-3 h-3 mr-1" /> Activar
+                                                                </Button>
+                                                            )}
                                                             <Button 
                                                                 variant={isActuallyExpired ? "destructive" : "outline"} 
                                                                 size="sm" 

@@ -119,7 +119,7 @@ function CustomerDialog({ onSave, currentName, currentID }: { onSave: (name: str
                             type="button" 
                             variant="ghost" 
                             size="sm" 
-                            className="h-8 text-[10px] text-blue-600 bg-blue-50 hover:bg-blue-100 flex items-center gap-1.5 font-bold w-full border border-blue-200"
+                            className="h-8 text-[10px] text-blue-600 bg-blue-50 hover:bg-blue-100 hover:text-blue-700 flex items-center gap-1.5 font-bold w-full border border-blue-200"
                             onClick={handleApplyCustomerData}
                         >
                             <Search className="w-3.5 h-3.5" />

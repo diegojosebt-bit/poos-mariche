@@ -44,7 +44,7 @@ export function PayRepairButton({ repairJob }: PayRepairButtonProps) {
 
 
     return (
-        <Button onClick={handlePay} variant="outline" size="sm" className="bg-green-500 text-white hover:bg-green-600 hover:text-white">
+        <Button onClick={handlePay} variant="outline" size="sm" className="bg-green-500 text-white hover:bg-[#008f39] hover:text-white">
             <DollarSign className="mr-2 h-4 w-4" />
             Cobrar
         </Button>

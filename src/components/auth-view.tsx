@@ -7,10 +7,11 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { BrandLockup } from "./icons";
-import { Loader2, Mail, Lock, AlertTriangle } from "lucide-react";
+import { Loader2, Mail, Lock, AlertTriangle, UserRound, Building2, Phone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ensureOnline } from "@/lib/offline-guard";
 import { doc, setDoc, updateDoc } from "firebase/firestore";
+import { deleteUser } from "firebase/auth";
 
 const SESSION_KEY = 'mm_session_id';
 
@@ -21,6 +22,10 @@ export function AuthView() {
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [businessName, setBusinessName] = useState("");
+  const [businessPhone, setBusinessPhone] = useState("");
   
   // Security states
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -54,6 +59,29 @@ export function AuthView() {
       return;
     }
 
+    if (!isLogin) {
+      if (accountName.trim().length < 2) {
+        toast({ variant: "destructive", title: "Nombre requerido", description: "Ingresa el nombre del propietario o de la cuenta." });
+        return;
+      }
+      if (businessName.trim().length < 2) {
+        toast({ variant: "destructive", title: "Negocio requerido", description: "Ingresa el nombre del negocio." });
+        return;
+      }
+      if (businessPhone.replace(/\D/g, "").length < 7) {
+        toast({ variant: "destructive", title: "Teléfono inválido", description: "Ingresa un número de teléfono válido." });
+        return;
+      }
+      if (password.length < 6) {
+        toast({ variant: "destructive", title: "Contraseña débil", description: "Debe tener al menos 6 caracteres." });
+        return;
+      }
+      if (password !== confirmPassword) {
+        toast({ variant: "destructive", title: "Las contraseñas no coinciden", description: "Verifica la confirmación de contraseña." });
+        return;
+      }
+    }
+
     setIsLoading(true);
     try {
       let userCredential;
@@ -72,7 +100,6 @@ export function AuthView() {
       // Reset security counter on success
       setFailedAttempts(0);
 
-      // 3. Background Sync (Non-blocking)
       const profileRef = doc(firestore, 'users', user.uid);
       const sessionUpdate = {
         lastSessionId: newSessionId,
@@ -80,19 +107,30 @@ export function AuthView() {
       };
 
       if (isLogin) {
-          updateDoc(profileRef, sessionUpdate).catch(err => console.warn("Background session sync error:", err));
+        // El login no bloquea la UI por la sincronización de sesión.
+        updateDoc(profileRef, sessionUpdate).catch(err => console.warn("Background session sync error:", err));
       } else {
-          setDoc(profileRef, {
+        try {
+          await setDoc(profileRef, {
             uid: user.uid,
             email: user.email,
+            accountName: accountName.trim(),
+            businessName: businessName.trim(),
+            businessPhone: businessPhone.trim(),
             lastSessionId: newSessionId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            licenseStatus: 'expired',
+            licenseStatus: 'pending',
+            licenseExpiry: '',
             enabledModules: ['inventory', 'pos', 'repairs', 'reports', 'expenses', 'analysis', 'fiados', 'inventory_aging'],
             lockedModules: [],
             isPinRequired: false,
-          }, { merge: true }).catch(err => console.warn("Background profile creation error:", err));
+          }, { merge: true });
+        } catch (profileError) {
+          // Si no se crea el perfil, no dejamos una cuenta huérfana.
+          try { await deleteUser(user); } catch {}
+          throw profileError;
+        }
       }
 
       // 4. Instant UI Response
@@ -171,6 +209,62 @@ export function AuthView() {
               </div>
             )}
 
+            {!isLogin && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="accountName" className="text-xs font-bold uppercase text-muted-foreground">Nombre para la cuenta</Label>
+                  <div className="relative">
+                    <UserRound className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="accountName"
+                      placeholder="Ej: María Pérez"
+                      className="pl-10"
+                      value={accountName}
+                      onChange={(e) => setAccountName(e.target.value)}
+                      autoComplete="name"
+                      disabled={isLoading || lockoutTimer > 0}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="businessName" className="text-xs font-bold uppercase text-muted-foreground">Nombre del negocio</Label>
+                    <div className="relative">
+                      <Building2 className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="businessName"
+                        placeholder="Mi negocio"
+                        className="pl-10"
+                        value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)}
+                        autoComplete="organization"
+                        disabled={isLoading || lockoutTimer > 0}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="businessPhone" className="text-xs font-bold uppercase text-muted-foreground">Teléfono</Label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="businessPhone"
+                        type="tel"
+                        placeholder="0412-0000000"
+                        className="pl-10"
+                        value={businessPhone}
+                        onChange={(e) => setBusinessPhone(e.target.value)}
+                        autoComplete="tel"
+                        disabled={isLoading || lockoutTimer > 0}
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="email" className="text-xs font-bold uppercase text-muted-foreground">Correo Electrónico</Label>
               <div className="relative">
@@ -183,6 +277,7 @@ export function AuthView() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading || lockoutTimer > 0}
+                  autoComplete="email"
                   required
                 />
               </div>
@@ -199,10 +294,30 @@ export function AuthView() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={isLoading || lockoutTimer > 0}
+                  autoComplete={isLogin ? "current-password" : "new-password"}
                   required
                 />
               </div>
             </div>
+            {!isLogin && (
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword" className="text-xs font-bold uppercase text-muted-foreground">Confirmar contraseña</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="••••••••"
+                    className="pl-10"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    disabled={isLoading || lockoutTimer > 0}
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+              </div>
+            )}
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button 

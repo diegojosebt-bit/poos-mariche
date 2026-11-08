@@ -841,7 +841,7 @@ function SettingsContent() {
                             size="sm" 
                             onClick={handleFetchOfficialRateInSettings} 
                             disabled={isFetchingOfficialRate}
-                            className="font-bold text-xs uppercase border-primary/20 text-primary hover:bg-primary/5 gap-1.5"
+                            className="font-bold text-xs uppercase border-primary/20 text-primary hover:bg-primary/5 hover:text-primary gap-1.5"
                         >
                             <RefreshCw className={cn("w-3.5 h-3.5", isFetchingOfficialRate && "animate-spin")} />
                             {isFetchingOfficialRate ? "Consultando..." : "Consultar BCV Oficial"}

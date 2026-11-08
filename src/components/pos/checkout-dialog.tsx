@@ -296,7 +296,7 @@ export function CheckoutDialog({
               </div>
 
               <div className="p-3 sm:p-3.5 bg-card border-t flex flex-col sm:flex-row gap-2 shrink-0 no-print">
-                   <Button onClick={onPrint} variant="outline" className="flex-1 h-10 font-medium text-xs border-primary/30 hover:bg-primary/5">
+                   <Button onClick={onPrint} variant="outline" className="flex-1 h-10 font-medium text-xs border-primary/30 hover:bg-primary/5 hover:text-primary">
                       <Printer className="mr-1.5 h-4 w-4 text-primary" />
                       Imprimir comprobante
                   </Button>

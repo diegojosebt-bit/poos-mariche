@@ -338,6 +338,7 @@ export type UserProfile = {
   id?: string;
   uid: string;
   email: string;
+  accountName?: string;
   businessName?: string;
   businessAddress?: string;
   businessRIF?: string;
@@ -346,7 +347,7 @@ export type UserProfile = {
   showRateOnReceipt?: boolean;
   showTermsOnReceipt?: boolean;
   printLeftMargin?: number;
-  licenseStatus: 'active' | 'expired' | 'trial';
+  licenseStatus: 'active' | 'expired' | 'trial' | 'pending';
   licenseExpiry: string;
   createdAt: string;
   isAdmin?: boolean;
