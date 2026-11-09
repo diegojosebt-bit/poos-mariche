@@ -28,7 +28,7 @@ PUBLIC = ROOT / "public"
 SRC = PUBLIC / "logo.png"
 
 # Azul de fondo del logo (zonas transparentes).
-BG = (9, 55, 81)
+BG = (23, 26, 31)
 
 # Radio de la zona segura de un icono "maskable" (80 % del ancho).
 SAFE_RADIUS = 0.4 * 512

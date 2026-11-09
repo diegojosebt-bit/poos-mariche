@@ -4,8 +4,8 @@
   "description": "Gestión integral de negocio y taller",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#093751",
-  "theme_color": "#093751",
+  "background_color": "#171A1F",
+  "theme_color": "#171A1F",
   "icons": [
     {
       "src": "/favicon.ico",
