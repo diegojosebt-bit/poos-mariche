@@ -1,39 +1,25 @@
-import type { SVGProps } from "react";
+import type { ImgHTMLAttributes, SVGProps } from "react";
 import { cn } from "@/lib/utils";
 
-export function AppLogo({ className, ...props }: SVGProps<SVGSVGElement>) {
+type AppLogoProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt">;
+
+/**
+ * Marca de la app: se usa `public/logo.png` tal cual (sin recortes).
+ * Los iconos derivados (favicon, PWA, iOS) se generan con
+ * `scripts/generate-brand-assets.py`.
+ */
+export function AppLogo({ className, ...props }: AppLogoProps) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 256 256"
-      role="img"
-      aria-label="MARICHE POS"
-      className={cn("shrink-0", className)}
+    // eslint-disable-next-line @next/next/no-img-element -- asset local, sin optimizacion necesaria
+    <img
+      src="/logo.png"
+      alt="MARICHE POS"
+      width={512}
+      height={512}
+      draggable={false}
+      className={cn("shrink-0 select-none object-contain", className)}
       {...props}
-    >
-      <defs>
-        <linearGradient id="logoAwningGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#a5b4fc" />
-        </linearGradient>
-      </defs>
-
-      {/* Base azul de la tienda */}
-      <rect x="28" y="56" width="200" height="180" rx="32" fill="#2532c2" />
-
-      {/* Toldo ondulado */}
-      <g>
-        <rect x="28" y="24" width="50" height="80" rx="25" fill="url(#logoAwningGrad)" />
-        <rect x="78" y="24" width="50" height="80" rx="25" fill="url(#logoAwningGrad)" />
-        <rect x="128" y="24" width="50" height="80" rx="25" fill="url(#logoAwningGrad)" />
-        <rect x="178" y="24" width="50" height="80" rx="25" fill="url(#logoAwningGrad)" />
-        <rect x="28" y="24" width="200" height="40" fill="url(#logoAwningGrad)" />
-      </g>
-
-      {/* Paneles frontales */}
-      <rect x="60" y="145" width="60" height="75" rx="12" fill="#c7d2fe" />
-      <rect x="136" y="145" width="60" height="50" rx="12" fill="#ffffff" />
-    </svg>
+    />
   );
 }
 

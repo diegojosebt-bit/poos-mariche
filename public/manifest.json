@@ -4,12 +4,12 @@
   "description": "Gestión integral de negocio y taller",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#2532C2",
-  "theme_color": "#2532C2",
+  "background_color": "#093751",
+  "theme_color": "#093751",
   "icons": [
     {
       "src": "/favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
+      "sizes": "16x16 24x24 32x32 48x48",
       "type": "image/x-icon"
     },
     {
@@ -22,7 +22,13 @@
       "src": "/icon.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
