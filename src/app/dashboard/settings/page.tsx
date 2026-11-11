@@ -670,7 +670,7 @@ function SettingsContent() {
                                                         autoComplete="current-password"
                                                         value={loginPassword}
                                                         onChange={(event) => setLoginPassword(event.target.value)}
-                                                        placeholder="Tu contraseña de MARICHE POS"
+                                                        placeholder="Tu contraseña de COBRANZA ONLINE"
                                                         className="h-9"
                                                     />
                                                     <Button

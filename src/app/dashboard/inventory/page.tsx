@@ -4,7 +4,7 @@ import React, { Suspense, useState, useMemo, useCallback, useEffect, useRef } fr
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
-import { PlusCircle, Trash2, Calculator, Clock, RefreshCw, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { PlusCircle, Trash2, Calculator, Clock, RefreshCw, Loader2, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import { DataTable } from "@/components/data-table";
 import { columns } from "@/components/inventory/columns";
 import type { Product } from '@/lib/types';
@@ -34,6 +34,7 @@ import { ensureOnline } from '@/lib/offline-guard';
 import { PrintLabelsButton } from '@/components/inventory/print-labels-button';
 import { PriceCalculatorDialog } from '@/components/tools/price-calculator-dialog';
 import { ProductFormDialog } from '@/components/inventory/product-form-dialog';
+import { BulkImportDialog } from '@/components/inventory/bulk-import-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { differenceInDays, parseISO } from 'date-fns';
@@ -296,10 +297,28 @@ function InventoryContent() {
         });
     };
 
+    const handleBulkImported = (imported: WithId<Product>[]) => {
+        if (usePaged && uid) {
+            // Un solo merge para 500 productos; evita 500 actualizaciones de caché.
+            queryCache.mergeIntoCatalog(uid, 'products', imported);
+            return;
+        }
+        legacy.mutate((prev) => {
+            const existing = new Set((prev || []).map((product) => product.id));
+            return [...imported.filter((product) => !existing.has(product.id)), ...(prev || [])];
+        });
+    };
+
     return (
         <>
             <PageHeader title="Inventario">
                 <PriceCalculatorDialog><Button variant="outline" size="icon" className="h-9 w-9 sm:h-10 sm:w-10"><Calculator className="h-4 w-4" /></Button></PriceCalculatorDialog>
+                <BulkImportDialog onImported={handleBulkImported}>
+                    <Button variant="outline" size="sm" className="sm:h-10 px-2 sm:px-4">
+                        <Upload className="mr-2 h-4 w-4" />
+                        <span className="hidden sm:inline">Importar Excel</span>
+                    </Button>
+                </BulkImportDialog>
                 <Button
                     size="sm"
                     className="sm:h-10 px-2 sm:px-4"

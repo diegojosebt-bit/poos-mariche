@@ -16,13 +16,13 @@
     --secondary-foreground: 220 39% 10%;
     --muted: 215 14% 92%;
     --muted-foreground: 215 14% 45%;
-    --accent: 144 100% 28%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 220 16% 94%;
+    --accent-foreground: 220 39% 15%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --border: 215 14% 88%;
     --input: 215 14% 88%;
-    --ring: 194 45% 33%;
+    --ring: 220 45% 42%;
     --chart-1: 194 45% 33%;
     --chart-2: 220 39% 26%;
     --chart-3: 12 76% 61%;
@@ -37,7 +37,7 @@
     --sidebar-accent: 220 39% 23%;
     --sidebar-accent-foreground: 0 0% 100%;
     --sidebar-border: 220 39% 23%;
-    --sidebar-ring: 194 45% 33%;
+    --sidebar-ring: 220 45% 42%;
   }
 
   .dark {
@@ -53,13 +53,13 @@
     --secondary-foreground: 210 40% 98%;
     --muted: 217 33% 17%;
     --muted-foreground: 215 20% 65%;
-    --accent: 144 100% 28%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 220 16% 20%;
+    --accent-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 217 33% 17%;
     --input: 217 33% 17%;
-    --ring: 194 45% 40%;
+    --ring: 220 45% 55%;
     
     --sidebar-background: 220 20% 9%;
     --sidebar-foreground: 210 40% 90%;
@@ -68,7 +68,7 @@
     --sidebar-accent: 217 33% 13%;
     --sidebar-accent-foreground: 0 0% 100%;
     --sidebar-border: 217 33% 13%;
-    --sidebar-ring: 194 45% 40%;
+    --sidebar-ring: 220 45% 55%;
   }
 }
 
@@ -149,9 +149,14 @@
     mm-splash-show 0.15s ease-out 0.7s forwards;
 }
 
+.mm-splash-logo {
+  opacity: 0;
+  animation: mm-splash-fade 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.05s forwards;
+}
+
 .mm-splash-word {
   opacity: 0;
-  animation: mm-splash-fade 0.4s cubic-bezier(0.22, 1, 0.36, 1) 1.35s forwards;
+  animation: mm-splash-fade 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.25s forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -161,6 +166,7 @@
     animation: none;
   }
 
+  .mm-splash-logo,
   .mm-splash-word {
     opacity: 1;
     transform: none;

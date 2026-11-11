@@ -1,11 +1,11 @@
 {
-  "name": "MARICHE POS",
-  "short_name": "Mariche POS",
+  "name": "COBRANZA ONLINE",
+  "short_name": "Cobranza Online",
   "description": "Gestión integral de negocio y taller",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#171A1F",
-  "theme_color": "#171A1F",
+  "background_color": "#070B1A",
+  "theme_color": "#0B61C1",
   "icons": [
     {
       "src": "/favicon.ico",

@@ -30,7 +30,7 @@ export const handlePrint = (
         <html>
             <head>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Etiquetas de Productos - MARICHE POS</title>
+                <title>Etiquetas de Productos - COBRANZA ONLINE</title>
                 <style>
                     @media print {
                         @page {

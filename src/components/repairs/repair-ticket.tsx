@@ -34,7 +34,7 @@ export function CustomerTicket({ repairJob, businessName, profile, bcvRate = 1, 
     return (
         <div className="ticket-body">
             <div className="text-center mb-2">
-                <h3 className="business-title bold-header" style={{ fontSize: '12pt' }}>{businessName || 'MARICHE POS'}</h3>
+                <h3 className="business-title bold-header" style={{ fontSize: '12pt' }}>{businessName || 'COBRANZA ONLINE'}</h3>
                 <p className="ticket-type mt-1 bold-header" style={{ fontSize: '10pt' }}>ORDEN DE REPARACIÓN</p>
                 <p className="meta-info">{repairJob.id}</p>
                 <p className="meta-info">Fecha: {fecha}</p>

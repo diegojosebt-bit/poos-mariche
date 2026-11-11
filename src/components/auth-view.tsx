@@ -185,6 +185,8 @@ export function AuthView() {
               orientation="vertical"
               showTagline={isLogin}
               className="text-foreground"
+              label="Cobranza Online"
+              textClassName="text-[28px] font-semibold tracking-tight normal-case leading-none"
             />
           </div>
           {!isLogin && (
@@ -272,7 +274,7 @@ export function AuthView() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="admin@posmariche.com"
+                  placeholder="admin@cobranzaonline.com"
                   className="pl-10"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}

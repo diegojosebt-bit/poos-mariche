@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'MARICHE POS - Gestión de Negocio',
+  title: 'COBRANZA ONLINE - Gestión de Negocio',
   description: 'Sistema de gestión integral para ventas, inventario, caja, reparaciones y reportes de transacciones.',
   manifest: '/manifest.json',
   icons: {
@@ -19,16 +19,16 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'MARICHE POS',
+    title: 'COBRANZA ONLINE',
   },
   openGraph: {
-    title: 'MARICHE POS - Gestión de Negocio',
+    title: 'COBRANZA ONLINE - Gestión de Negocio',
     description: 'Sistema de gestión integral para ventas, inventario, caja, reparaciones y reportes de transacciones.',
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: '#171A1F',
+  themeColor: '#0B61C1',
 };
 
 export default function RootLayout({
@@ -46,4 +46,3 @@ export default function RootLayout({
     </html>
   );
 }
-

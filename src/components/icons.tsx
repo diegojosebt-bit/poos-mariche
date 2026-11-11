@@ -13,7 +13,7 @@ export function AppLogo({ className, ...props }: AppLogoProps) {
     // eslint-disable-next-line @next/next/no-img-element -- asset local, sin optimizacion necesaria
     <img
       src="/logo.png"
-      alt="MARICHE POS"
+      alt="COBRANZA ONLINE"
       width={512}
       height={512}
       draggable={false}
@@ -29,6 +29,8 @@ type BrandLockupProps = {
   showTagline?: boolean;
   className?: string;
   textClassName?: string;
+  /** Nombre visible; por defecto en mayusculas. */
+  label?: string;
 };
 
 const SIZES = {
@@ -43,6 +45,7 @@ export function BrandLockup({
   showTagline = false,
   className,
   textClassName,
+  label = "COBRANZA ONLINE",
 }: BrandLockupProps) {
   const s = SIZES[size];
   const vertical = orientation === "vertical";
@@ -64,7 +67,7 @@ export function BrandLockup({
             textClassName,
           )}
         >
-          MARICHE POS
+          {label}
         </span>
         {showTagline && (
           <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.25em] text-muted-foreground">

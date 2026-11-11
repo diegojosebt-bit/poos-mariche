@@ -43,7 +43,13 @@ export function AppLock() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <BrandLockup size="md" orientation="vertical" className="text-foreground" />
+            <BrandLockup
+              size="md"
+              orientation="vertical"
+              className="text-foreground"
+              label="Cobranza Online"
+              textClassName="text-xl font-semibold tracking-tight normal-case leading-none"
+            />
           </div>
           <CardTitle className="text-2xl">Acceso Protegido</CardTitle>
           <CardDescription>

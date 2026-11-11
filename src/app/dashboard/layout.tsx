@@ -38,8 +38,8 @@ function LicenseExpiredScreen({ profile }: { profile: UserProfile | null }) {
 
     const message = encodeURIComponent(
         isPending
-        ? `Hola, acabo de registrar mi negocio (${profile?.email}) en MARICHE POS. Deseo activar mi cuenta.`
-        : `Hola, mi cuenta de MARICHE POS (${profile?.email}) ha sido suspendida o la licencia ha expirado. Deseo gestionar la renovación de mi acceso.`
+        ? `Hola, acabo de registrar mi negocio (${profile?.email}) en COBRANZA ONLINE. Deseo activar mi cuenta.`
+        : `Hola, mi cuenta de COBRANZA ONLINE (${profile?.email}) ha sido suspendida o la licencia ha expirado. Deseo gestionar la renovación de mi acceso.`
     );
     
     const handleSignOut = () => {
