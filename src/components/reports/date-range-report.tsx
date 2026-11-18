@@ -422,10 +422,10 @@ export function DateRangeReport({
                 </div>
 
                 <div className="p-4 sm:p-5 space-y-4">
-                    {/* KPIs compactos y equilibrados */}
+                    {/* KPIs compactos y equilibrados (2 col en móvil, 3 en tablet, 5 en escritorio amplio) */}
                     <div className={cn(
                         "grid grid-cols-2 gap-2.5",
-                        canViewCostsAndProfits ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-3"
+                        canViewCostsAndProfits ? "sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5" : "sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4"
                     )}>
                         <div className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-2xs">
                             <p className="text-[11px] font-medium text-slate-500">Recaudación total</p>
@@ -491,7 +491,7 @@ export function DateRangeReport({
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
                             {Object.entries(stats.bsBreakdown).map(([method, amount]) => {
                                 const Icon = methodIcons[method] || Landmark;
                                 const style = methodStyles[method] || { color: 'text-slate-600', bg: 'bg-white', border: 'border-slate-200' };

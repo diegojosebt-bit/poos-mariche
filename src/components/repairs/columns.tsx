@@ -750,6 +750,7 @@ export const columns: ColumnDef<RepairJob>[] = [
   },
   {
     id: "timer",
+    meta: { className: "hidden xl:table-cell text-center" },
     header: () => <div className="text-center">Duración</div>,
     cell: ({ row }) => (
         <ServiceTimer 
@@ -770,6 +771,7 @@ export const columns: ColumnDef<RepairJob>[] = [
   },
    {
     accessorKey: "amountPaid",
+    meta: { className: "hidden xl:table-cell text-right" },
     header: () => <div className="text-right">Pagado</div>,
     cell: function Cell({ row }) {
       const { format, getSymbol } = useCurrency();

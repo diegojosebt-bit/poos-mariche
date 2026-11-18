@@ -115,7 +115,7 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
     <div className="flex flex-col h-full overflow-hidden">
         <div className="mb-2.5 flex shrink-0 items-center gap-2">
             <Select value={activeCategory} onValueChange={setActiveCategory}>
-                <SelectTrigger className="h-10 w-[116px] shrink-0 truncate text-xs sm:h-9 sm:w-[160px] rounded-xl border-slate-200 bg-white text-slate-800 shadow-2xs hover:bg-slate-50 focus:ring-blue-500/20">
+                <SelectTrigger className="h-10 w-[116px] shrink-0 truncate text-xs sm:h-9 sm:w-[130px] xl:w-[160px] rounded-xl border-slate-200 bg-white text-slate-800 shadow-2xs hover:bg-slate-50 focus:ring-blue-500/20">
                     <SelectValue placeholder="Categoría" />
                 </SelectTrigger>
                 <SelectContent className="bg-white border-slate-200 text-slate-800 shadow-xl">
@@ -151,7 +151,7 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
 
         <div className="relative flex-1 min-h-0">
           <ScrollArea className="h-full">
-            <div className="grid grid-cols-1 gap-1.5 pr-2 sm:grid-cols-3 sm:gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
+            <div className="grid grid-cols-1 gap-1.5 pr-2 sm:grid-cols-2 sm:gap-2 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {isLoading ? (
                     Array.from({ length: 18 }).map((_, i) => (
                         <Card key={`skeleton-${i}`} className="h-[120px] bg-white border-slate-200 shadow-2xs">
@@ -250,7 +250,7 @@ export function ProductGrid({ products, onProductSelect, isLoading, mutateProduc
         <div className="flex items-center justify-between pt-2.5 pb-1 flex-shrink-0 bg-transparent mt-auto border-t border-slate-200/90 gap-2">
             <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-500 font-normal">
-                    Pág. <span className="text-slate-800 font-medium">{currentPage}</span> de {totalPages} ({filteredProducts.length} producto{filteredProducts.length === 1 ? '' : 's'})
+                    Pág. <span className="text-slate-800 font-medium">{currentPage}</span> de {totalPages}<span className="hidden sm:inline text-slate-400"> ({filteredProducts.length})</span>
                 </span>
                 {onLoadMore && hasMore && (
                     <Button

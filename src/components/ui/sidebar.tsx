@@ -5,7 +5,7 @@ import { Slot } from "@radix-ui/react-slot"
 import { VariantProps, cva } from "class-variance-authority"
 import { PanelLeft } from "lucide-react"
 
-import { useIsMobile } from "@/hooks/use-mobile"
+import { useIsMobile, TABLET_MAX_WIDTH } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -71,8 +71,32 @@ const SidebarProvider = React.forwardRef<
     const [openMobile, setOpenMobile] = React.useState(false)
 
     // This is the internal state of the sidebar.
-    // We use openProp and setOpenProp for control from outside the component.
-    const [_open, _setOpen] = React.useState(defaultOpen)
+    // In tablet mode (<= 1180px, including 1024x768), default to collapsed (icon rail 48px)
+    // to give the user maximum workspace (+208px net width).
+    const [_open, _setOpen] = React.useState(() => {
+      if (typeof window !== "undefined") {
+        if (window.innerWidth <= TABLET_MAX_WIDTH) {
+          return false
+        }
+      }
+      return defaultOpen
+    })
+
+    // Sincronizar en el cliente al montar o redimensionar a tablet
+    React.useEffect(() => {
+      if (typeof window === "undefined") return
+      const mql = window.matchMedia(`(max-width: ${TABLET_MAX_WIDTH}px)`)
+      if (openProp === undefined && mql.matches) {
+        _setOpen(false)
+      }
+      const handler = (e: MediaQueryListEvent) => {
+        if (openProp === undefined && e.matches) {
+          _setOpen(false)
+        }
+      }
+      mql.addEventListener("change", handler)
+      return () => mql.removeEventListener("change", handler)
+    }, [openProp])
     const open = openProp ?? _open
     const setOpen = React.useCallback(
       (value: boolean | ((value: boolean) => boolean)) => {

@@ -773,12 +773,26 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
     const [concept, setConcept] = useState("");
     const [totalAmount, setTotalAmount] = useState("");
     const [selectedItems, setSelectedItems] = useState<FiadoItem[]>([]);
+    const usePaged = useFeatureFlag(profile, 'pagedData');
 
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user && isOpen) ? query(collection(firestore, 'users', user.uid, 'products'), limit(50)) : null, 
+        (firestore && user && isOpen) ? collection(firestore, 'users', user.uid, 'products') : null, 
         [firestore, user?.uid, isOpen]
     );
-    const { data: products } = useCollection<Product>(productsCollection);
+    const legacyProducts = useCollection<Product>(usePaged ? null : productsCollection);
+
+    const pagedProducts = usePagedQuery<Product>({
+        collectionName: 'products',
+        orderField: 'name',
+        orderDir: 'asc',
+        pageSize: 100,
+        enabled: isOpen && usePaged,
+    });
+    const pagedList = useMemo(
+        () => pagedProducts.items.filter((p) => !p.isDeleted),
+        [pagedProducts.items]
+    );
+    const products = usePaged ? pagedList : legacyProducts.data;
 
     const repairJobsCollection = useMemoFirebase(() => 
         (firestore && user && isOpen) ? query(collection(firestore, 'users', user.uid, 'repair_jobs'), orderBy('createdAt', 'desc'), limit(100)) : null, 
@@ -1081,17 +1095,32 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
 
 function AddItemsToFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: Fiado) => void }) {
     const { firestore, user } = useFirebase();
+    const { profile } = useDashboardStore();
     const { toast } = useToast();
     const { getFinalPrice } = useCurrency();
     const [loading, setLoading] = useState(false);
     const [open, setOpen] = useState(false);
     const [selectedItems, setSelectedItems] = useState<FiadoItem[]>([]);
+    const usePaged = useFeatureFlag(profile, 'pagedData');
 
     const productsCollection = useMemoFirebase(() => 
-        (firestore && user && open) ? query(collection(firestore, 'users', user.uid, 'products'), limit(50)) : null, 
+        (firestore && user && open) ? collection(firestore, 'users', user.uid, 'products') : null, 
         [firestore, user?.uid, open]
     );
-    const { data: products } = useCollection<Product>(productsCollection);
+    const legacyProducts = useCollection<Product>(usePaged ? null : productsCollection);
+
+    const pagedProducts = usePagedQuery<Product>({
+        collectionName: 'products',
+        orderField: 'name',
+        orderDir: 'asc',
+        pageSize: 100,
+        enabled: open && usePaged,
+    });
+    const pagedList = useMemo(
+        () => pagedProducts.items.filter((p) => !p.isDeleted),
+        [pagedProducts.items]
+    );
+    const products = usePaged ? pagedList : legacyProducts.data;
 
     const handleAddItem = (p: Product) => {
         const price = getFinalPrice(p);

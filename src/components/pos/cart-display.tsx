@@ -3,7 +3,7 @@
 import { cleanObject } from "@/lib/json-guard";
 import type { CartItem, Payment, Product, Sale, RepairJob, ReservedPart } from "@/lib/types";
 import { Button } from "../ui/button";
-import { Trash2, TicketPercent, Gift, ParkingSquare, UserPlus, UserX, UserCheck, User, Search, BadgePercent, Tag, ShoppingCart, ArrowRight, ArrowLeft, ShieldAlert } from "lucide-react";
+import { Trash2, TicketPercent, Gift, ParkingSquare, UserPlus, UserX, UserCheck, User, Search, BadgePercent, Tag, ShoppingCart, ArrowRight, ArrowLeft, ShieldAlert, Plus, Minus } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { CheckoutDialog } from "./checkout-dialog";
 import { useCurrency } from "@/hooks/use-currency";
@@ -1168,7 +1168,18 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                             {item.isRepair && <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-blue-300 bg-blue-50 text-blue-700 font-medium">Reparación</Badge>}
                         </div>
 
-                        <div className="mt-2 flex items-center gap-2">
+                        <div className="mt-2 flex items-center gap-1.5">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-7 w-7 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-100 active:scale-95 shrink-0"
+                                onClick={() => onUpdateQuantity(item.productId, Math.max(1, item.quantity - 1))}
+                                disabled={item.isRepair || item.quantity <= 1}
+                                aria-label="Disminuir cantidad"
+                            >
+                                <Minus className="h-3 w-3" />
+                            </Button>
                             <input
                                 type="number"
                                 step="any"
@@ -1176,10 +1187,21 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                                 enterKeyHint="done"
                                 value={item.quantity}
                                 onChange={(e) => onUpdateQuantity(item.productId, Math.max(0.001, parseFloat(e.target.value) || 0))}
-                                className="h-8 w-14 rounded-lg border border-slate-200 bg-white text-slate-800 text-center text-xs font-medium shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                className="h-7 w-12 rounded-lg border border-slate-200 bg-white text-slate-800 text-center text-xs font-semibold shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                 disabled={item.isRepair}
                                 aria-label={`Cantidad de ${item.name}`}
                             />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-7 w-7 rounded-lg border-slate-200 bg-white text-slate-700 hover:bg-slate-100 active:scale-95 shrink-0"
+                                onClick={() => onUpdateQuantity(item.productId, item.quantity + 1)}
+                                disabled={item.isRepair}
+                                aria-label="Aumentar cantidad"
+                            >
+                                <Plus className="h-3 w-3" />
+                            </Button>
                             {unitLabel && <span className="text-[10px] font-normal text-slate-500">{unitLabel}</span>}
                             <div className="ml-auto">
                                 <CartLineActions
@@ -1243,18 +1265,44 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                                     </div>
                                 </div>
                             </TableCell>
-                            <TableCell className="text-center">
+                            <TableCell className="text-center px-1">
                                 <div className="flex flex-col items-center gap-0.5">
-                                    <input 
-                                        type="number" 
-                                        step="any"
-                                        inputMode="decimal"
-                                        enterKeyHint="done"
-                                        value={item.quantity} 
-                                        onChange={(e) => onUpdateQuantity(item.productId, Math.max(0.001, parseFloat(e.target.value) || 0))} 
-                                        className="w-16 border border-slate-200 bg-white text-slate-800 font-medium rounded-lg text-center text-xs h-7 shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-                                        disabled={item.isRepair} 
-                                    />
+                                    <div className="flex items-center gap-0.5 justify-center">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-6 w-6 rounded-md border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 active:scale-95 shrink-0"
+                                            onClick={() => onUpdateQuantity(item.productId, Math.max(1, item.quantity - 1))}
+                                            disabled={item.isRepair || item.quantity <= 1}
+                                            aria-label="Disminuir cantidad"
+                                            title="Disminuir"
+                                        >
+                                            <Minus className="h-2.5 w-2.5" />
+                                        </Button>
+                                        <input 
+                                            type="number" 
+                                            step="any"
+                                            inputMode="decimal"
+                                            enterKeyHint="done"
+                                            value={item.quantity} 
+                                            onChange={(e) => onUpdateQuantity(item.productId, Math.max(0.001, parseFloat(e.target.value) || 0))} 
+                                            className="w-10 border border-slate-200 bg-white text-slate-800 font-semibold rounded-md text-center text-xs h-6 shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                                            disabled={item.isRepair} 
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-6 w-6 rounded-md border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 active:scale-95 shrink-0"
+                                            onClick={() => onUpdateQuantity(item.productId, item.quantity + 1)}
+                                            disabled={item.isRepair}
+                                            aria-label="Aumentar cantidad"
+                                            title="Aumentar"
+                                        >
+                                            <Plus className="h-2.5 w-2.5" />
+                                        </Button>
+                                    </div>
                                     {unitLabel && <span className="text-[10px] font-normal text-slate-500">{unitLabel}</span>}
                                 </div>
                             </TableCell>

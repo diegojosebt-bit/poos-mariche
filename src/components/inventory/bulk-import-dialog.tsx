@@ -21,6 +21,7 @@ import { useCurrency } from "@/hooks/use-currency";
 import { useToast } from "@/hooks/use-toast";
 import { ensureOnline } from "@/lib/offline-guard";
 import { formatCategoryName } from "@/lib/inventory-utils";
+import { buildSearchTokens, normalizeText } from "@/lib/search-index";
 import type { Product } from "@/lib/types";
 import type { WithId } from "@/lib/firestore/query-cache";
 
@@ -290,6 +291,8 @@ export function BulkImportDialog({
           isDeleted: false,
           salesCount: 0,
           searchKeywords: makeKeywords(row.name, row.category, row.sku),
+          searchTokens: buildSearchTokens([row.name, row.category, row.sku]),
+          searchName: normalizeText(row.name),
           createdAt: new Date().toISOString(),
         };
         return {

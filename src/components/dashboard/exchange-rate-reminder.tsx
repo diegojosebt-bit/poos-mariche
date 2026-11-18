@@ -95,7 +95,7 @@ function AccountMenu({
                     variant="ghost"
                     className={cn(
                         "rounded-full border border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-sm transition-all flex items-center group focus-visible:ring-0 focus-visible:ring-offset-0",
-                        size === "desktop" ? "h-9 pl-1 pr-2.5 gap-2" : "h-8 w-8 justify-center p-0"
+                        size === "desktop" ? "h-9 pl-1 pr-1 xl:pr-2.5 gap-1.5" : "h-8 w-8 justify-center p-0"
                     )}
                     aria-label="Menú de cuenta"
                     title="Menú de cuenta"
@@ -421,7 +421,7 @@ export function ExchangeRateReminder() {
             <div className="hidden h-14 px-4 md:flex md:items-center md:justify-between gap-3">
                 <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
                     <div className={cn(
-                        "inline-flex h-9 items-center gap-2 pl-1.5 pr-3 rounded-xl border text-xs font-semibold shadow-xs transition-colors shrink-0",
+                        "inline-flex h-9 items-center gap-1.5 pl-1.5 pr-2 xl:pr-3 rounded-xl border text-xs font-semibold shadow-xs transition-colors shrink-0",
                         isOnline 
                             ? "border-slate-200/90 bg-gradient-to-r from-slate-50/90 via-white to-white text-slate-700" 
                             : "border-rose-200 bg-rose-50 text-rose-700"
@@ -434,13 +434,13 @@ export function ExchangeRateReminder() {
                         )}>
                             {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
                         </span>
-                        <span className="tracking-tight">
+                        <span className="tracking-tight hidden xl:inline">
                             {isOnline ? "En Línea" : "Sin Internet"}
                         </span>
                     </div>
 
                     {/* Widget BCV Oficial (h-9 con badge de icono esmeralda) */}
-                    <div className="inline-flex h-9 items-center gap-2 rounded-xl border border-emerald-200/90 bg-gradient-to-r from-emerald-50/90 via-white to-white pl-1.5 pr-1.5 shadow-xs transition-colors hover:border-emerald-300 shrink-0">
+                    <div className="inline-flex h-9 items-center gap-1.5 sm:gap-2 rounded-xl border border-emerald-200/90 bg-gradient-to-r from-emerald-50/90 via-white to-white pl-1.5 pr-1.5 shadow-xs transition-colors hover:border-emerald-300 shrink-0">
                         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-2xs">
                             <Landmark className="h-3.5 w-3.5" />
                         </span>
@@ -467,12 +467,13 @@ export function ExchangeRateReminder() {
                     </div>
 
                     {/* Widget Tasa Paralelo (h-9 con badge de icono azul) */}
-                    <div className="inline-flex h-9 items-center gap-2 rounded-xl border border-blue-200/90 bg-gradient-to-r from-blue-50/90 via-white to-white pl-1.5 pr-3 shadow-xs transition-colors hover:border-blue-300 shrink-0">
+                    <div className="inline-flex h-9 items-center gap-1.5 sm:gap-2 rounded-xl border border-blue-200/90 bg-gradient-to-r from-blue-50/90 via-white to-white pl-1.5 pr-2.5 shadow-xs transition-colors hover:border-blue-300 shrink-0">
                         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-2xs">
                             <TrendingUp className="h-3.5 w-3.5" />
                         </span>
                         <span className="text-[11px] font-semibold tracking-tight text-blue-700">
-                            Paralelo
+                            <span className="hidden xl:inline">Paralelo</span>
+                            <span className="xl:hidden">Par.</span>
                         </span>
                         <div className="flex items-baseline gap-1">
                             <span className="text-[13px] font-bold tabular-nums text-slate-900">
@@ -487,10 +488,11 @@ export function ExchangeRateReminder() {
                             variant="default" 
                             size="sm" 
                             onClick={handleInstallClick}
-                            className="h-9 px-3 text-xs font-semibold bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-xl shadow-sm shadow-emerald-500/20 shrink-0"
+                            className="h-9 px-2.5 text-xs font-semibold bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-xl shadow-sm shadow-emerald-500/20 shrink-0"
+                            title="Instalar Cobranza Online"
                         >
                             <Download className="mr-1.5 h-3.5 w-3.5" />
-                            Instalar App
+                            Instalar
                         </Button>
                     )}
                 </div>

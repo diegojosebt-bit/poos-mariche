@@ -121,8 +121,28 @@ export function useServerSearch<T>(opts: ServerSearchOptions<T>) {
           limit(pageSize),
         );
 
-        const snapshot = await withTimeout(getDocs(q), 2500);
+        let snapshot = await withTimeout(getDocs(q), 2500);
         countServerReads(Math.max(1, snapshot.size), `${opts.collectionName}:search`);
+
+        // Respaldo para documentos creados previamente sin searchTokens:
+        // si la consulta por searchTokens viene vacía, intentamos por searchKeywords
+        if (snapshot.empty && tokensField === 'searchTokens') {
+          try {
+            const fallbackQ = query(
+              collection(firestore, 'users', uid, opts.collectionName),
+              ...equalityFilters,
+              where('searchKeywords', 'array-contains', lastToken.toLowerCase()),
+              limit(pageSize),
+            );
+            const fallbackSnap = await withTimeout(getDocs(fallbackQ), 2500);
+            if (!fallbackSnap.empty) {
+              snapshot = fallbackSnap;
+              countServerReads(snapshot.size, `${opts.collectionName}:search-fallback`);
+            }
+          } catch {
+            // Fallback silencioso: no bloquea la interfaz si no existe el campo
+          }
+        }
 
         if (cancelled || myGeneration !== generation.current) return;
 

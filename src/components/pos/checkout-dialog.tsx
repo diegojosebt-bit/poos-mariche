@@ -459,7 +459,7 @@ export function CheckoutDialog({
                                         onClick={() => handleAddPayment(method.value)}
                                         disabled={isSubmitting}
                                         className={cn(
-                                            "flex items-center gap-2 px-2.5 py-2 rounded-lg border border-slate-200/90 bg-white active:scale-[0.98] transition-all text-left group cursor-pointer",
+                                            "flex items-center gap-2 px-2.5 py-2 min-h-[44px] rounded-xl border border-slate-200/90 bg-white active:scale-[0.98] transition-all text-left group cursor-pointer",
                                             method.color
                                         )}
                                     >

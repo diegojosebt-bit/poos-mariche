@@ -44,6 +44,7 @@ import { Checkbox } from "../ui/checkbox";
 import { SmoothCollapse } from "@/components/ui/smooth-collapse";
 import { useCurrency } from "@/hooks/use-currency";
 import { formatCategoryInput, formatCategoryName } from "@/lib/inventory-utils";
+import { buildSearchTokens, normalizeText } from "@/lib/search-index";
 
 const comboItemSchema = z.object({
   productId: z.string(),
@@ -277,13 +278,26 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
         const cat = formatCategoryName(values.category) || "General";
         const modelsArray = values.compatibleModels ? values.compatibleModels.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
         
+        const searchKeywords = generateSearchKeywords(values.name, values.sku, cat, modelsArray);
+        const searchTokens = buildSearchTokens([
+            values.name,
+            values.sku,
+            values.barcode,
+            cat,
+            modelsArray,
+            searchKeywords,
+        ]);
+
         const finalValues = {
             ...values,
             name: values.name.toUpperCase().trim(),
             category: cat,
             sku: values.sku.toUpperCase().trim(),
             compatibleModels: modelsArray,
-            searchKeywords: generateSearchKeywords(values.name, values.sku, cat, modelsArray)
+            searchKeywords,
+            searchTokens,
+            searchName: normalizeText(values.name),
+            isDeleted: false,
         };
 
         if (inventorySettingsRef) {

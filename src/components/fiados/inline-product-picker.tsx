@@ -5,6 +5,7 @@ import { PackageSearch, Plus, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { normalizeText } from "@/lib/search-index";
 import type { Product } from "@/lib/types";
 
 /**
@@ -42,11 +43,19 @@ export function InlineProductPicker({
   }, [isOpen]);
 
   const results = useMemo(() => {
-    const q = term.trim().toUpperCase();
-    const list = products.filter((p) => !p.isCombo && (p.stockLevel || 0) > 0);
+    const q = normalizeText(term);
+    const list = (products || []).filter((p) => !p.isDeleted);
     if (!q) return list.slice(0, 30);
     return list
-      .filter((p) => `${p.name} ${p.sku ?? ""}`.toUpperCase().includes(q))
+      .filter((p) => {
+        return (
+          normalizeText(p.name).includes(q) ||
+          normalizeText(p.sku).includes(q) ||
+          normalizeText(p.barcode).includes(q) ||
+          normalizeText(p.category).includes(q) ||
+          normalizeText((p.compatibleModels ?? []).join(" ")).includes(q)
+        );
+      })
       .slice(0, 30);
   }, [products, term]);
 
@@ -137,21 +146,30 @@ export function InlineProductPicker({
           <div className="max-h-52 overflow-y-auto divide-y divide-slate-100 border-t border-slate-100">
             {results.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-slate-400">
-                Sin resultados disponibles en stock.
+                Sin productos que coincidan con la búsqueda.
               </p>
             ) : (
               results.map((product) => {
                 const price = getPrice ? getPrice(product) : undefined;
+                const availableStock = Number(product.stockLevel) || 0;
+                const isOutOfStock = availableStock <= 0;
                 return (
                   <button
                     key={product.id}
                     type="button"
                     tabIndex={isOpen ? 0 : -1}
+                    disabled={isOutOfStock}
                     onClick={() => handleSelect(product)}
-                    className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-blue-50/50 active:bg-blue-50 cursor-pointer"
+                    className={cn(
+                      "group flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors",
+                      isOutOfStock
+                        ? "opacity-60 bg-slate-50/50 cursor-not-allowed"
+                        : "hover:bg-blue-50/50 active:bg-blue-50 cursor-pointer"
+                    )}
+                    title={isOutOfStock ? "Sin stock disponible para fiar" : undefined}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-slate-800 group-hover:text-blue-700">
+                      <p className={cn("truncate text-xs font-medium", isOutOfStock ? "text-slate-500" : "text-slate-800 group-hover:text-blue-700")}>
                         {product.name}
                       </p>
                       {product.sku && (
@@ -166,12 +184,20 @@ export function InlineProductPicker({
                           ${price.toFixed(2)}
                         </span>
                       )}
-                      <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                        {product.stockLevel} disp.
-                      </Badge>
-                      <span className="hidden sm:flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                        <Plus className="h-3.5 w-3.5" />
-                      </span>
+                      {isOutOfStock ? (
+                        <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700">
+                          0 disp. (Agotado)
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                          {availableStock} disp.
+                        </Badge>
+                      )}
+                      {!isOutOfStock && (
+                        <span className="hidden sm:flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                          <Plus className="h-3.5 w-3.5" />
+                        </span>
+                      )}
                     </div>
                   </button>
                 );

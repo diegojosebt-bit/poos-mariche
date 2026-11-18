@@ -22,6 +22,8 @@ export type Product = {
   lowStockThreshold: number;
   compatibleModels?: string[];
   searchKeywords?: string[];
+  searchTokens?: string[];
+  searchName?: string;
   isCombo?: boolean;
   comboItems?: ComboItem[];
   isGiftable?: boolean;

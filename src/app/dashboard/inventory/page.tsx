@@ -576,6 +576,34 @@ function InventoryContent() {
                     )}
                 </div>
 
+                {(searchTerm.trim().length > 0 && (categoryFilter !== 'all' || stockFilter !== 'all')) && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 shadow-2xs">
+                        <div className="flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                            <span>
+                                Buscando con filtro activo:{" "}
+                                <strong>
+                                    {categoryFilter !== 'all' ? `Categoría "${categoryFilter}"` : ''}
+                                    {categoryFilter !== 'all' && stockFilter !== 'all' ? ' · ' : ''}
+                                    {stockFilter === 'low' ? 'Stock Bajo' : stockFilter === 'out' ? 'Sin Stock' : stockFilter === 'old' ? 'Antiguos (+15d)' : ''}
+                                </strong>. Los productos que no coincidan con este filtro no se mostrarán.
+                            </span>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                                setCategoryFilter('all');
+                                setStockFilter('all');
+                            }}
+                            className="h-7 rounded-lg text-xs font-semibold text-amber-900 hover:bg-amber-100 hover:text-amber-950 cursor-pointer"
+                        >
+                            Quitar filtros
+                        </Button>
+                    </div>
+                )}
+
                 <DataTable 
                     columns={tableColumns} 
                     data={filteredProducts}

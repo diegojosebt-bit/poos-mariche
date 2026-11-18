@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking } from "@/firebase";
 import { collection, doc, query, limit, orderBy, runTransaction } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
-import { Calculator, Plus, RefreshCw } from "lucide-react";
+import { Calculator, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { HeldSalesSheet } from "@/components/pos/held-sales-sheet";
 import { POSActionsSheet } from "@/components/pos/pos-actions-sheet";
 import { AddToCartFlash } from "@/components/pos/add-to-cart-flash";
@@ -424,32 +424,57 @@ function POSContent() {
             {desktopTopBarHost && createPortal(
                 <div className="flex items-center gap-1.5 sm:gap-2">
                     <HeldSalesSheet heldSales={heldSales || []} />
-                    <PriceCalculatorDialog>
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="h-9 px-2.5 sm:px-3 rounded-full border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs text-xs font-medium flex items-center gap-1.5 transition-all" 
-                            aria-label="Calculadora de precios" 
-                            title="Calculadora de precios"
-                        >
-                            <Calculator className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                            <span className="hidden lg:inline">Calculadora</span>
-                        </Button>
-                    </PriceCalculatorDialog>
-                    <CustomItemDialog 
-                        onAddCustomItem={handleAddCustomItem} 
-                        trigger={
+
+                    {/* En escritorio amplio (xl: >= 1280px) se ven los dos botones directos */}
+                    <div className="hidden xl:flex items-center gap-1.5">
+                        <PriceCalculatorDialog>
                             <Button 
                                 variant="outline" 
                                 size="sm" 
-                                className="h-9 px-2.5 sm:px-3 rounded-full border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs text-xs font-medium flex items-center gap-1.5 transition-all" 
-                                title="Venta Rápida (Artículo Manual)"
+                                className="h-9 px-3 rounded-full border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs text-xs font-medium flex items-center gap-1.5 transition-all" 
+                                aria-label="Calculadora de precios" 
+                                title="Calculadora de precios"
                             >
-                                <Plus className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                                <span className="hidden lg:inline">Venta Rápida</span>
+                                <Calculator className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                                <span>Calculadora</span>
                             </Button>
-                        }
-                    />
+                        </PriceCalculatorDialog>
+                        <CustomItemDialog 
+                            onAddCustomItem={handleAddCustomItem} 
+                            trigger={
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-9 px-3 rounded-full border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs text-xs font-medium flex items-center gap-1.5 transition-all" 
+                                    title="Venta Rápida (Artículo Manual)"
+                                >
+                                    <Plus className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                                    <span>Venta Rápida</span>
+                                </Button>
+                            }
+                        />
+                    </div>
+
+                    {/* En tablet (768px - 1180px, ej: 1024x768) se agrupan en un desplegable como en móvil */}
+                    <div className="flex xl:hidden items-center">
+                        <POSActionsSheet
+                            heldSales={heldSales || []}
+                            onAddCustomItem={handleAddCustomItem}
+                            hideHeldSales
+                            trigger={
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-9 px-2.5 rounded-full border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs text-xs font-medium flex items-center gap-1.5 transition-all"
+                                    aria-label="Herramientas: Calculadora y Venta Rápida"
+                                    title="Herramientas (Calculadora y Venta Rápida)"
+                                >
+                                    <SlidersHorizontal className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                                    <span className="text-xs font-medium">Herramientas</span>
+                                </Button>
+                            }
+                        />
+                    </div>
                 </div>,
                 desktopTopBarHost
             )}
@@ -500,9 +525,9 @@ function POSContent() {
                 </div>
             </div>
 
-            <main className="flex-1 flex flex-col md:grid md:grid-cols-3 lg:grid-cols-5 overflow-hidden bg-slate-100/70">
+            <main className="flex-1 flex flex-col md:grid md:grid-cols-12 overflow-hidden bg-slate-100/70">
                 <div className={cn(
-                    "order-1 md:order-2 md:col-span-2 lg:col-span-3 p-2 sm:p-4 overflow-hidden flex flex-col flex-1 min-h-0 bg-slate-100/60",
+                    "order-1 md:order-2 md:col-span-5 lg:col-span-5 xl:col-span-7 2xl:col-span-8 p-2 sm:p-3 xl:p-4 overflow-hidden flex flex-col flex-1 min-h-0 bg-slate-100/60",
                     mobilePane === 'cart' && "hidden md:flex"
                 )}>
                      <ProductGrid 
@@ -518,7 +543,7 @@ function POSContent() {
                     />
                 </div>
                 <div className={cn(
-                    "order-2 md:order-1 md:col-span-1 lg:col-span-2 bg-white border-t md:border-t-0 md:border-r border-slate-200/80 flex flex-col flex-1 min-h-0 md:h-full",
+                    "order-2 md:order-1 md:col-span-7 lg:col-span-7 xl:col-span-5 2xl:col-span-4 bg-white border-t md:border-t-0 md:border-r border-slate-200/80 flex flex-col flex-1 min-h-0 md:h-full",
                     mobilePane === 'products' && "hidden md:flex"
                 )}>
                     <CartDisplay 

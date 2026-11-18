@@ -199,6 +199,7 @@ export const columns: ColumnDef<Product>[] = [
   },
   {
     id: "age",
+    meta: { className: "hidden xl:table-cell text-center" },
     header: () => <div className="text-center">Antigüedad</div>,
     cell: ({ row, table }) => {
         const product = row.original;
@@ -312,6 +313,7 @@ export const columns: ColumnDef<Product>[] = [
   },
   {
     accessorKey: "stockLevel",
+    meta: { className: "hidden xl:table-cell text-center" },
     header: ({ column }) => (
         <div className="text-center">
             <Button
@@ -390,6 +392,7 @@ export const columns: ColumnDef<Product>[] = [
   },
   {
     accessorKey: "costPrice",
+    meta: { className: "hidden xl:table-cell text-right" },
     header: () => <div className="text-right">Costo</div>,
     cell: function Cell({ row }) {
         const { format } = useCurrency();

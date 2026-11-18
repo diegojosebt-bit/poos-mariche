@@ -267,7 +267,13 @@ export function DataTable<TData, TValue>({
                 <TableRow key={headerGroup.id} className="border-slate-200/80 hover:bg-transparent">
                 {headerGroup.headers.map((header) => {
                     return (
-                    <TableHead key={header.id} className="h-11 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <TableHead 
+                        key={header.id} 
+                        className={cn(
+                            "h-11 text-[11px] font-semibold uppercase tracking-wider text-slate-500",
+                            (header.column.columnDef.meta as any)?.className
+                        )}
+                    >
                         {header.isPlaceholder
                         ? null
                         : flexRender(
@@ -302,7 +308,13 @@ export function DataTable<TData, TValue>({
                     )}
                 >
                     {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="py-3 text-sm text-slate-700">
+                    <TableCell 
+                        key={cell.id} 
+                        className={cn(
+                            "py-3 text-sm text-slate-700",
+                            (cell.column.columnDef.meta as any)?.className
+                        )}
+                    >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                     ))}

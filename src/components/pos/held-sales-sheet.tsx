@@ -76,13 +76,13 @@ export function HeldSalesSheet({ heldSales, trigger, onSaleRestored }: HeldSales
             title={`Ventas en espera (${heldSales.length})`}
           >
             <FolderClock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-            <span className="hidden lg:inline font-medium text-xs">En Espera</span>
+            <span className="hidden xl:inline font-medium text-xs">En Espera</span>
             {heldSales.length > 0 ? (
               <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-medium text-white">
                 {heldSales.length}
               </span>
             ) : (
-              <span className="hidden lg:inline text-[11px] font-normal text-slate-400">(0)</span>
+              <span className="hidden xl:inline text-[11px] font-normal text-slate-400">(0)</span>
             )}
           </Button>
         )}
