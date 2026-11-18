@@ -1,0 +1,231 @@
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ArrowLeftRight, Plus } from "lucide-react";
+import { useCurrency } from "@/hooks/use-currency";
+import { SmoothCollapse } from "@/components/ui/smooth-collapse";
+
+type CustomItemDialogProps = {
+  onAddCustomItem: (name: string, price: number, costPrice: number) => void;
+  /** Disparador alternativo (por ejemplo, una fila dentro de una hoja). */
+  trigger?: React.ReactNode;
+};
+
+type CurrencyMode = "USD" | "Bs";
+
+export function CustomItemDialog({ onAddCustomItem, trigger }: CustomItemDialogProps) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [costPrice, setCostPrice] = useState<string>("");
+  const [price, setPrice] = useState<string>("");
+  const [costCurrency, setCostCurrency] = useState<CurrencyMode>("USD");
+  const [priceCurrency, setPriceCurrency] = useState<CurrencyMode>("Bs");
+
+  const { format, convert, bcvRate, parallelRate } = useCurrency();
+
+  const costNum = parseFloat(costPrice) || 0;
+  const priceNum = parseFloat(price);
+
+  // Costo: si viene en Bs se protege a tasa paralelo.
+  // Venta: si viene en Bs se factura a BCV.
+  const costUsd = costCurrency === "Bs"
+    ? convert(costNum, "Bs", "USD", true)
+    : costNum;
+
+  const priceUsd = !isNaN(priceNum)
+    ? (priceCurrency === "Bs" ? convert(priceNum, "Bs", "USD") : priceNum)
+    : 0;
+
+  const profit = priceUsd - costUsd;
+  const margin = priceUsd > 0 ? (profit / priceUsd) * 100 : 0;
+  const hasPrice = !isNaN(priceNum) && priceUsd > 0;
+
+  const costEquivalent = costNum > 0
+    ? costCurrency === "Bs"
+      ? `≈ $${format(costUsd)}`
+      : `≈ Bs ${format(convert(costNum, "USD", "Bs", true))}`
+    : "";
+
+  const priceEquivalent = hasPrice
+    ? priceCurrency === "Bs"
+      ? `≈ $${format(priceUsd)}`
+      : `≈ Bs ${format(convert(priceNum, "USD", "Bs"))}`
+    : "";
+
+  const toggleCostCurrency = () => {
+    const value = parseFloat(costPrice);
+    if (!isNaN(value) && value > 0) {
+      const next = costCurrency === "USD"
+        ? convert(value, "USD", "Bs", true)
+        : convert(value, "Bs", "USD", true);
+      setCostPrice(next.toFixed(2));
+    }
+    setCostCurrency((current) => (current === "USD" ? "Bs" : "USD"));
+  };
+
+  const togglePriceCurrency = () => {
+    const value = parseFloat(price);
+    if (!isNaN(value) && value > 0) {
+      const next = priceCurrency === "Bs"
+        ? convert(value, "Bs", "USD")
+        : convert(value, "USD", "Bs");
+      // 6 decimales al pasar a USD para no perder Bs al volver.
+      setPrice(next.toFixed(priceCurrency === "Bs" ? 6 : 2));
+    }
+    setPriceCurrency((current) => (current === "Bs" ? "USD" : "Bs"));
+  };
+
+  const handleAdd = () => {
+    if (!name.trim() || !hasPrice) return;
+
+    onAddCustomItem(
+      name.trim().toUpperCase(),
+      Number(priceUsd.toFixed(6)),
+      Number(costUsd.toFixed(2)),
+    );
+
+    setName("");
+    setCostPrice("");
+    setPrice("");
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button variant="outline" size="icon" className="border-slate-200 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-2xs" title="Añadir Artículo Manual">
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-sm bg-white border-slate-200 text-slate-900 shadow-xl">
+        <DialogHeader>
+          <DialogTitle className="uppercase font-bold text-slate-900">Venta Rápida</DialogTitle>
+          <DialogDescription className="text-xs text-slate-500">
+            Toca el título de cada campo para cambiar entre $ y Bs.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-3">
+          <div className="space-y-2">
+            <Label htmlFor="custom-name" className="text-[10px] font-bold uppercase text-slate-600">
+              Nombre
+            </Label>
+            <Input
+              id="custom-name"
+              name="mm-custom-name"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="EJ: CABLE GENÉRICO, LIMPIEZA..."
+              value={name}
+              onChange={(e) => setName(e.target.value.toUpperCase())}
+              className="uppercase h-10 bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-blue-500 shadow-2xs"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={toggleCostCurrency}
+                aria-label="Cambiar moneda del costo"
+                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-slate-600 hover:text-blue-600 transition-colors"
+              >
+                Costo ({costCurrency === "Bs" ? "Bs" : "$"})
+                <ArrowLeftRight className="w-3 h-3 opacity-60 text-blue-600" />
+              </button>
+              <Input
+                id="custom-cost"
+                name="mm-custom-cost"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                autoComplete="off"
+                placeholder="0.00"
+                value={costPrice}
+                onChange={(e) => setCostPrice(e.target.value)}
+                className="h-10 font-mono bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-blue-500 shadow-2xs"
+              />
+              {costEquivalent && (
+                <p className="text-[10px] text-slate-500 text-right">{costEquivalent}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={togglePriceCurrency}
+                aria-label="Cambiar moneda de la venta"
+                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-slate-600 hover:text-blue-600 transition-colors"
+              >
+                Venta ({priceCurrency === "Bs" ? "Bs" : "$"})
+                <ArrowLeftRight className="w-3 h-3 opacity-60 text-blue-600" />
+              </button>
+              <Input
+                id="custom-price"
+                name="mm-custom-price"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                autoComplete="off"
+                placeholder={priceCurrency === "Bs" ? "0,00" : "0.00"}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                className="h-10 font-mono bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-blue-500 shadow-2xs"
+              />
+              {priceEquivalent && (
+                <p className="text-[10px] font-bold text-emerald-600 text-right">{priceEquivalent}</p>
+              )}
+            </div>
+          </div>
+
+          <SmoothCollapse open={hasPrice}>
+            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-[11px]">
+              <span className="font-bold uppercase text-slate-600">Utilidad</span>
+              <span className={`font-mono font-black ${profit >= 0 ? "text-emerald-700" : "text-rose-600"}`}>
+                ${format(profit)}
+                <span className="ml-1 text-[10px] font-bold opacity-80">
+                  ({format(margin)}%)
+                </span>
+              </span>
+            </div>
+          </SmoothCollapse>
+
+          <p className="text-[10px] text-slate-500 text-center">
+            Costo en Bs: paralelo Bs {format(parallelRate)} · Venta en Bs: BCV Bs {format(bcvRate)}
+          </p>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} className="uppercase font-bold border-slate-200 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50">
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleAdd}
+            disabled={!name.trim() || !hasPrice}
+            className="uppercase font-bold bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-500/25"
+          >
+            Añadir al Carrito
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

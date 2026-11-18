@@ -1,0 +1,190 @@
+
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Perfil del usuario y configuración de su negocio.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "businessName": { "type": "string" },
+        "licenseStatus": { "type": "string", "enum": ["active", "trial", "expired"] },
+        "licenseExpiry": { "type": "string", "format": "date-time" },
+        "isAdmin": { "type": "boolean" },
+        "lastSessionId": { "type": "string" },
+        "enabledModules": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Worker": {
+      "title": "Worker",
+      "description": "Perfil de trabajador fijo.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Product": {
+      "title": "Product",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "sku": { "type": "string" },
+        "costPrice": { "type": "number" },
+        "stockLevel": { "type": "number" },
+        "reservedStock": { "type": "number" },
+        "damagedStock": { "type": "number" },
+        "hasIVA": { "type": "boolean" }
+      }
+    },
+    "RepairJob": {
+      "title": "RepairJob",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerID": { "type": "string" },
+        "status": { "type": "string" },
+        "amountPaid": { "type": "number" },
+        "estimatedCost": { "type": "number" }
+      }
+    },
+    "Fiado": {
+      "title": "Fiado",
+      "description": "Registro de deuda de cliente.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerID": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "status": { "type": "string" }
+      }
+    },
+    "Sale": {
+      "title": "Sale",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "transactionDate": { "type": "string" }
+      }
+    },
+    "PayrollPayment": {
+      "title": "PayrollPayment",
+      "description": "Registro de pago a trabajador.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "workerId": { "type": "string" },
+        "workerName": { "type": "string" },
+        "amountUSD": { "type": "number" },
+        "amountBs": { "type": "number" },
+        "methodUSD": { "type": "string" },
+        "methodBs": { "type": "string" },
+        "dateFrom": { "type": "string", "format": "date" },
+        "dateTo": { "type": "string", "format": "date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Loan": {
+      "title": "Loan",
+      "description": "Registro de préstamo a socio.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "partnerName": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "sourceMethod": { "type": "string" },
+        "currency": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "paid"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CurrencyExchange": {
+      "title": "CurrencyExchange",
+      "description": "Registro de compra de USD con Bs de caja.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bsAmount": { "type": "number" },
+        "usdAmount": { "type": "number" },
+        "rate": { "type": "number" },
+        "sourceMethod": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Gastos generales (Mercancía, Servicios, etc.)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string", "enum": ["Mercancía", "Servicios", "Alquiler", "Retiro Personal", "Otros"] },
+        "amountUSD": { "type": "number" },
+        "amountBs": { "type": "number" },
+        "methodUSD": { "type": "string" },
+        "methodBs": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "auth": {
+    "providers": ["password"]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": { "entityName": "User", "description": "Perfil del negocio." }
+      },
+      {
+        "path": "/users/{userId}/workers/{workerId}",
+        "definition": { "entityName": "Worker", "description": "Lista de personal." }
+      },
+      {
+        "path": "/users/{userId}/products/{productId}",
+        "definition": { "entityName": "Product", "description": "Inventario." }
+      },
+      {
+        "path": "/users/{userId}/repair_jobs/{jobId}",
+        "definition": { "entityName": "RepairJob", "description": "Trabajos técnicos." }
+      },
+      {
+        "path": "/users/{userId}/fiados/{fiadoId}",
+        "definition": { "entityName": "Fiado", "description": "Créditos a clientes." }
+      },
+      {
+        "path": "/users/{userId}/sale_transactions/{saleId}",
+        "definition": { "entityName": "Sale", "description": "Ventas y abonos." }
+      },
+      {
+        "path": "/users/{userId}/payroll_payments/{paymentId}",
+        "definition": { "entityName": "PayrollPayment", "description": "Registro de nómina." }
+      },
+      {
+        "path": "/users/{userId}/loans/{loanId}",
+        "definition": { "entityName": "Loan", "description": "Préstamos a socios." }
+      },
+      {
+        "path": "/users/{userId}/currency_exchanges/{exchangeId}",
+        "definition": { "entityName": "CurrencyExchange", "description": "Historial de compra de divisas." }
+      },
+      {
+        "path": "/users/{userId}/expenses/{expenseId}",
+        "definition": { "entityName": "Expense", "description": "Gastos y compras de mercancía." }
+      }
+    ]
+  }
+}
