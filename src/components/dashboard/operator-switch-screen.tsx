@@ -177,6 +177,15 @@ export function OperatorSwitchScreen() {
     clearLockoutState(OPERATOR_PIN_LOCKOUT_KEY);
     setLockoutSeconds(0);
     setFailedAttempts(0);
+
+    // Al iniciar turno explícito con PIN, limpiamos cualquier revocación previa de esta caja
+    if (profile.revokedSessions?.[currentDeviceId] && firestore && user) {
+      const pRef = doc(firestore, 'users', user.uid);
+      void updateDoc(pRef, {
+        [`revokedSessions.${currentDeviceId}`]: deleteField(),
+      }).catch(() => {});
+    }
+
     selectOperator(operator);
     setSelectedId(null);
     setPin("");

@@ -303,11 +303,19 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
             setIsSupervisorMode(false);
             setSupervisorRegisterHolder(null);
 
-            // Limpiar la señal de revocación y cualquier sesión remanente en Firestore
-            void updateDoc(pRef, {
-                [`revokedSessions.${deviceId}`]: deleteField(),
-                [`activeSessions.${deviceId}`]: deleteField(),
-            }).catch(() => {});
+            // Asegurarse de que activeSessions no tenga este dispositivo en Firestore
+            if (rawSessions[deviceId]) {
+                void updateDoc(pRef, {
+                    [`activeSessions.${deviceId}`]: deleteField(),
+                }).catch(() => {});
+            }
+
+            // Si no hay sistema de cajeros con PIN, cerrar sesión totalmente a la pantalla de login
+            if (!cashierMode) {
+                if (auth) void signOut(auth);
+                window.location.href = '/';
+                return;
+            }
 
             toast({
                 variant: "destructive",

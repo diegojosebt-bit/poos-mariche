@@ -8,6 +8,7 @@ import {
   buildOwnerOperator,
   hasCashierSystemActive,
 } from '@/lib/cashiers';
+import { getOrCreateDeviceId } from '@/lib/device-session';
 
 const ACTIVE_OPERATOR_KEY = 'mm_active_operator_id';
 const REGISTER_NAME_KEY = 'mm_register_name';
@@ -129,6 +130,15 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   // Sincroniza operador activo en tiempo real cuando llega o cambia `profile`
   useEffect(() => {
     if (!profile) return;
+
+    // Si este equipo fue revocado explícitamente desde el panel, no restaurar ningún operador
+    const deviceId = getOrCreateDeviceId();
+    if (profile.revokedSessions?.[deviceId]) {
+      setActiveOperator(null);
+      setIsSupervisorMode(false);
+      setSupervisorRegisterHolder(null);
+      return;
+    }
 
     // Sin cajeros activos: el dueño opera directamente sin pantalla intermedia.
     if (!hasCashierSystemActive(profile)) {

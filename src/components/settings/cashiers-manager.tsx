@@ -132,7 +132,10 @@ export function CashiersManager() {
 
   const myDeviceId = getOrCreateDeviceId();
   const freshSessions = useMemo(() => getFreshSessions(profile?.activeSessions), [profile?.activeSessions]);
-  const activeSessionList = useMemo(() => Object.values(freshSessions), [freshSessions]);
+  const activeSessionList = useMemo(() => {
+    const revoked = profile?.revokedSessions || {};
+    return Object.values(freshSessions).filter((s) => !revoked[s.deviceId]);
+  }, [freshSessions, profile?.revokedSessions]);
   const [releasingDeviceId, setReleasingDeviceId] = useState<string | null>(null);
 
   const userProfileRef = firestore && user ? doc(firestore, "users", user.uid) : null;
