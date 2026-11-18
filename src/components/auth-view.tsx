@@ -283,11 +283,13 @@ export function AuthView() {
 
       const user = userCredential.user;
 
-      // Limpiar operador previo al iniciar sesión en limpio (evita arrastrar sesiones viejas)
+      // Limpiar operador previo y regenerar ID de caja al iniciar sesión en limpio (evita arrastrar sesiones viejas o revocadas)
       try {
         localStorage.removeItem('mm_active_operator_id');
         sessionStorage.removeItem('mm_active_operator_id');
         sessionStorage.removeItem('mm_security_unlocked');
+        sessionStorage.removeItem('mm_device_id');
+        localStorage.removeItem('mm_device_id');
       } catch {}
 
       // Limpiar bloqueo tras acceso exitoso; aplicar cooldown breve tras registro exitoso
