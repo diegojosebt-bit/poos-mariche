@@ -425,6 +425,8 @@ export type UserProfile = {
   cashiers?: CashierProfile[];
   /** Sesiones activas simultáneas por dispositivo (hasta maxRegisters). */
   activeSessions?: Record<string, ActiveRegisterSession>;
+  /** Señales de revocación explícita para expulsar dispositivos remotos liberados. */
+  revokedSessions?: Record<string, string>;
   /** Banderas de despliegue progresivo (Fase 2+). */
   featureFlags?: Record<string, boolean>;
   securityPin?: string;

@@ -8,7 +8,9 @@ import {
   Crown,
   Eye,
   EyeOff,
+  Loader2,
   Lock,
+  LogOut,
   ShieldCheck,
   UserCheck,
   Users,
@@ -18,6 +20,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useDashboardStore } from "@/contexts/dashboard-context";
+import { useFirebase } from "@/firebase";
+import { signOut } from "firebase/auth";
+import { doc, updateDoc, deleteField } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import {
   OWNER_OPERATOR_ID,
@@ -65,6 +70,7 @@ export function OperatorSwitchScreen() {
     setIsOperatorPromptOpen,
     registerName,
   } = useDashboardStore();
+  const { auth, firestore, user } = useFirebase();
   const { toast } = useToast();
   const { setOpenMobile } = useSidebar();
   const pathname = usePathname();
@@ -107,8 +113,31 @@ export function OperatorSwitchScreen() {
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
   const [failedAttempts, setFailedAttempts] = useState(0);
+
+  const handleSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    try {
+      if (firestore && user && currentDeviceId && currentDeviceId !== 'server') {
+        try {
+          await updateDoc(doc(firestore, 'users', user.uid), {
+            [`activeSessions.${currentDeviceId}`]: deleteField(),
+          });
+        } catch {}
+      }
+      localStorage.removeItem('mm_session_id');
+      localStorage.removeItem('mm_active_operator_id');
+      sessionStorage.removeItem('mm_active_operator_id');
+      sessionStorage.removeItem('mm_security_unlocked');
+      sessionStorage.removeItem('mm_device_id');
+      if (auth) await signOut(auth);
+    } finally {
+      window.location.href = '/';
+    }
+  };
 
   useEffect(() => {
     if (!isVisible) {
@@ -403,6 +432,23 @@ export function OperatorSwitchScreen() {
                   );
                 })}
               </div>
+
+              <div className="border-t border-slate-100 pt-3 mt-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleSignOut}
+                  disabled={isSigningOut}
+                  className="h-9 w-full rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                >
+                  {isSigningOut ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <LogOut className="mr-2 h-4 w-4" />
+                  )}
+                  {isSigningOut ? "Cerrando sesión..." : "Cerrar sesión / Salir al inicio"}
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -517,6 +563,17 @@ export function OperatorSwitchScreen() {
                   className="h-11 w-full rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
                 >
                   {isLockedOut ? `Bloqueado (${lockoutSeconds}s)` : "Iniciar turno"}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleSignOut}
+                  disabled={isSigningOut}
+                  className="h-8 w-full rounded-xl text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <LogOut className="mr-2 h-3.5 w-3.5" />
+                  Salir al inicio de sesión
                 </Button>
               </div>
             </div>

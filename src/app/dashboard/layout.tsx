@@ -294,6 +294,29 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
         const fresh = getFreshSessions(rawSessions);
         const staleSessionKeys = Object.keys(rawSessions).filter((k) => !fresh[k]);
 
+        // 0. VERIFICAR SI ESTE EQUIPO FUE EXPULSADO/REVOCADO POR EL ADMINISTRADOR:
+        if (profile.revokedSessions?.[deviceId]) {
+            console.warn(`[Multi-Caja] Este equipo (${deviceId}) fue revocado explícitamente.`);
+            lastSyncedSlotSigRef.current = null;
+            clearActiveOperator();
+            setRegisterLimitBlocked(null);
+            setIsSupervisorMode(false);
+            setSupervisorRegisterHolder(null);
+
+            // Limpiar la señal de revocación y cualquier sesión remanente en Firestore
+            void updateDoc(pRef, {
+                [`revokedSessions.${deviceId}`]: deleteField(),
+                [`activeSessions.${deviceId}`]: deleteField(),
+            }).catch(() => {});
+
+            toast({
+                variant: "destructive",
+                title: "Sesión cerrada",
+                description: "Esta caja fue liberada o cerrada desde el panel de control.",
+            });
+            return;
+        }
+
         // Si no hay operador activo en este equipo (pantalla de PIN):
         // Asegurar que si este dispositivo tenía una sesión abierta en Firestore, se libere de inmediato.
         if (cashierMode && !activeOperator) {
@@ -345,14 +368,14 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
         }
 
         // 2. CHEQUEO DE EXPULSIÓN / CUPO RECLAMADO:
-        // Si este cajero ya estaba sincronizado pero su sesión fue borrada de Firestore
-        // (por ejemplo, porque el administrador liberó el cupo o se transfirió):
-        if (!effectiveOperator.isOwner && lastSyncedSlotSigRef.current && !fresh[deviceId]) {
+        // Si este equipo ya estaba sincronizado pero su sesión fue borrada de Firestore:
+        if (lastSyncedSlotSigRef.current && !fresh[deviceId]) {
             console.warn(`[Multi-Caja] Sesión eliminada en servidor para ${deviceId}. Cerrando turno.`);
             lastSyncedSlotSigRef.current = null;
             clearActiveOperator();
             setRegisterLimitBlocked(null);
             setIsSupervisorMode(false);
+            setSupervisorRegisterHolder(null);
             toast({
                 variant: "destructive",
                 title: "Turno cerrado",
@@ -524,6 +547,7 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
             patch[`activeSessions.${replaceDeviceId}.mode`] = 'supervisor';
         } else if (replaceDeviceId !== deviceId) {
             patch[`activeSessions.${replaceDeviceId}`] = deleteField();
+            patch[`revokedSessions.${replaceDeviceId}`] = new Date().toISOString();
         }
         for (const staleKey of Object.keys(rawSessions)) {
             if (!fresh[staleKey] && staleKey !== deviceId) {

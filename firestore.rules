@@ -92,8 +92,21 @@ service cloud.firestore {
         (
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['activeSessions']) ||
           (
-            request.resource.data.activeSessions is map &&
-            request.resource.data.activeSessions.size() <= 25
+            !('activeSessions' in request.resource.data) ||
+            (
+              request.resource.data.activeSessions is map &&
+              request.resource.data.activeSessions.size() <= 25
+            )
+          )
+        ) &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['revokedSessions']) ||
+          (
+            !('revokedSessions' in request.resource.data) ||
+            (
+              request.resource.data.revokedSessions is map &&
+              request.resource.data.revokedSessions.size() <= 25
+            )
           )
         )
       );

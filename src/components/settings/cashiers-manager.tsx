@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
-import { doc, deleteField } from "firebase/firestore";
+import { doc, deleteField, updateDoc } from "firebase/firestore";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import { getFreshSessions, getOrCreateDeviceId } from "@/lib/device-session";
@@ -133,6 +133,7 @@ export function CashiersManager() {
   const myDeviceId = getOrCreateDeviceId();
   const freshSessions = useMemo(() => getFreshSessions(profile?.activeSessions), [profile?.activeSessions]);
   const activeSessionList = useMemo(() => Object.values(freshSessions), [freshSessions]);
+  const [releasingDeviceId, setReleasingDeviceId] = useState<string | null>(null);
 
   const userProfileRef = firestore && user ? doc(firestore, "users", user.uid) : null;
 
@@ -453,15 +454,28 @@ export function CashiersManager() {
     });
   };
 
-  const handleReleaseSession = (targetDeviceId: string, deviceName: string) => {
-    if (!userProfileRef) return;
-    updateDocumentNonBlocking(userProfileRef, {
-      [`activeSessions.${targetDeviceId}`]: deleteField(),
-    });
-    toast({
-      title: "Caja liberada",
-      description: `Se cerró la sesión de "${deviceName}". El cupo ya está disponible.`,
-    });
+  const handleReleaseSession = async (targetDeviceId: string, deviceName: string) => {
+    if (!userProfileRef || releasingDeviceId) return;
+    setReleasingDeviceId(targetDeviceId);
+    try {
+      await updateDoc(userProfileRef, {
+        [`activeSessions.${targetDeviceId}`]: deleteField(),
+        [`revokedSessions.${targetDeviceId}`]: new Date().toISOString(),
+      });
+      toast({
+        title: "Caja liberada",
+        description: `Se cerró la sesión de "${deviceName}". El cupo ya está disponible.`,
+      });
+    } catch (err) {
+      console.error("[Sesiones] Error al liberar caja:", err);
+      toast({
+        variant: "destructive",
+        title: "Error al liberar",
+        description: "No se pudo liberar la caja remota. Revisa tu conexión a internet.",
+      });
+    } finally {
+      setReleasingDeviceId(null);
+    }
   };
 
   const quotaPct = limits.maxCashiers > 0 ? Math.min(100, (cashiers.length / limits.maxCashiers) * 100) : 100;
@@ -604,10 +618,15 @@ export function CashiersManager() {
                               type="button"
                               variant="ghost"
                               size="sm"
+                              disabled={releasingDeviceId === session.deviceId}
                               onClick={() => handleReleaseSession(session.deviceId, session.deviceName || "Caja")}
                               className="h-7 shrink-0 rounded-lg px-2 text-[10px] font-medium text-rose-600 hover:bg-rose-50 hover:text-rose-700"
                             >
-                              Liberar
+                              {releasingDeviceId === session.deviceId ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                "Liberar"
+                              )}
                             </Button>
                           )}
                         </div>
