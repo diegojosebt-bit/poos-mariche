@@ -580,6 +580,15 @@ function AddExpenseDialog({ children, onAdded, isOpen, setIsOpen }: { children: 
                                         step="0.01"
                                         min="0"
                                         value={amountUSD}
+                                        onFocus={(e) => {
+                                            try { e.currentTarget.select(); } catch {}
+                                            const target = e.currentTarget;
+                                            if (typeof window !== "undefined") {
+                                                window.requestAnimationFrame(() => {
+                                                    try { target.select(); } catch {}
+                                                });
+                                            }
+                                        }}
                                         onChange={(e) => setAmountUSD(e.target.value)}
                                         placeholder="0.00"
                                         className="h-7 w-full min-w-0 bg-transparent p-0 text-base font-semibold tabular-nums text-slate-900 outline-none placeholder:text-slate-400"
@@ -599,6 +608,15 @@ function AddExpenseDialog({ children, onAdded, isOpen, setIsOpen }: { children: 
                                         step="0.01"
                                         min="0"
                                         value={amountBs}
+                                        onFocus={(e) => {
+                                            try { e.currentTarget.select(); } catch {}
+                                            const target = e.currentTarget;
+                                            if (typeof window !== "undefined") {
+                                                window.requestAnimationFrame(() => {
+                                                    try { target.select(); } catch {}
+                                                });
+                                            }
+                                        }}
                                         onChange={(e) => setAmountBs(e.target.value)}
                                         placeholder="0.00"
                                         className="h-7 w-full min-w-0 bg-transparent p-0 text-base font-semibold tabular-nums text-emerald-700 outline-none placeholder:text-slate-400"

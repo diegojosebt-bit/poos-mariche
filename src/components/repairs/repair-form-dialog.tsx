@@ -198,7 +198,7 @@ function ManualPartDialog({ onAdd, open, onOpenChange }: { onAdd: (part: any) =>
                                     inputMode="decimal"
                                     step="any"
                                     min="0"
-                                    value={cost}
+                                    value={cost === "0" ? "" : (cost ?? "")}
                                     onChange={(e) => handleCostChange(e.target.value)}
                                     placeholder="0.00"
                                     className="h-9 rounded-lg border-slate-200 bg-white pl-7 text-xs font-medium tabular-nums text-slate-900 focus-visible:border-blue-500"
@@ -220,8 +220,17 @@ function ManualPartDialog({ onAdd, open, onOpenChange }: { onAdd: (part: any) =>
                                         step="any"
                                         min="0"
                                         aria-label="Precio sugerido BCV en dólares"
-                                        value={focusedField === "bcv" ? priceBcv : (priceBcv ? Number(priceBcv).toFixed(2) : "")}
-                                        onFocus={() => setFocusedField("bcv")}
+                                        value={focusedField === "bcv" ? priceBcv : (priceBcv && Number(priceBcv) > 0 ? Number(priceBcv).toFixed(2) : "")}
+                                        onFocus={(e) => {
+                                            setFocusedField("bcv");
+                                            try { e.currentTarget.select(); } catch {}
+                                            const target = e.currentTarget;
+                                            if (typeof window !== "undefined") {
+                                                window.requestAnimationFrame(() => {
+                                                    try { target.select(); } catch {}
+                                                });
+                                            }
+                                        }}
                                         onBlur={() => setFocusedField(null)}
                                         onChange={(e) => setPriceBcv(e.target.value)}
                                         className="h-7 w-full min-w-0 bg-transparent p-0 text-base font-semibold tabular-nums text-blue-700 outline-none placeholder:text-slate-400"
@@ -245,8 +254,17 @@ function ManualPartDialog({ onAdd, open, onOpenChange }: { onAdd: (part: any) =>
                                         step="any"
                                         min="0"
                                         aria-label="Precio sugerido de oferta en dólares"
-                                        value={focusedField === "oferta" ? priceOferta : (priceOferta ? Number(priceOferta).toFixed(2) : "")}
-                                        onFocus={() => setFocusedField("oferta")}
+                                        value={focusedField === "oferta" ? priceOferta : (priceOferta && Number(priceOferta) > 0 ? Number(priceOferta).toFixed(2) : "")}
+                                        onFocus={(e) => {
+                                            setFocusedField("oferta");
+                                            try { e.currentTarget.select(); } catch {}
+                                            const target = e.currentTarget;
+                                            if (typeof window !== "undefined") {
+                                                window.requestAnimationFrame(() => {
+                                                    try { target.select(); } catch {}
+                                                });
+                                            }
+                                        }}
                                         onBlur={() => setFocusedField(null)}
                                         onChange={(e) => setPriceOferta(e.target.value)}
                                         className="h-7 w-full min-w-0 bg-transparent p-0 text-base font-semibold tabular-nums text-emerald-700 outline-none placeholder:text-slate-400"

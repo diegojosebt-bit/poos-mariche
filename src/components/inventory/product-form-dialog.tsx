@@ -618,7 +618,13 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                                 <Input
                                     type="number"
                                     step="0.01"
+                                    placeholder="0.00"
                                     {...field}
+                                    value={field.value === 0 ? "" : (field.value ?? "")}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        field.onChange(val === "" ? 0 : parseFloat(val) || 0);
+                                    }}
                                     className="h-9 rounded-lg border-slate-200 bg-white pl-7 text-xs font-medium tabular-nums text-slate-900 focus-visible:border-blue-500"
                                 />
                             </div>
@@ -690,7 +696,10 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                                     <FormControl>
                                         <Input
                                             type="number"
+                                            placeholder="0"
                                             {...field}
+                                            value={field.value === "0" ? "" : (field.value ?? "")}
+                                            onChange={(e) => field.onChange(e.target.value)}
                                             className="h-9 rounded-lg border-blue-200 bg-white text-xs font-medium tabular-nums text-blue-700 focus-visible:border-blue-500"
                                         />
                                     </FormControl>
@@ -706,7 +715,13 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                                         <Input
                                             type="number"
                                             step="0.01"
+                                            placeholder="0.00"
                                             {...field}
+                                            value={field.value === 0 ? "" : (field.value ?? "")}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                field.onChange(val === "" ? 0 : parseFloat(val) || 0);
+                                            }}
                                             className="h-9 rounded-lg border-amber-200 bg-white text-xs font-medium tabular-nums text-amber-700 focus-visible:border-amber-500"
                                         />
                                     </FormControl>
@@ -742,9 +757,10 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                                         <Input 
                                             type="number" 
                                             step="0.01"
+                                            placeholder="0.00"
                                             name={field.name}
                                             ref={field.ref}
-                                            value={isEditingFixedPrice ? fixedPriceDraft : Number(field.value || 0).toFixed(2)}
+                                            value={isEditingFixedPrice ? fixedPriceDraft : (Number(field.value || 0) > 0 ? Number(field.value || 0).toFixed(2) : "")}
                                             className="h-7 border-none bg-transparent p-0 text-lg font-semibold tabular-nums text-blue-700 focus-visible:ring-0 focus-visible:ring-offset-0"
                                             onFocus={() => {
                                                 setIsEditingFixedPrice(true);
@@ -789,9 +805,10 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                                         <Input 
                                             type="number" 
                                             step="0.01"
+                                            placeholder="0.00"
                                             name={field.name}
                                             ref={field.ref}
-                                            value={isEditingPromoPrice ? promoPriceDraft : Number(field.value || 0).toFixed(2)}
+                                            value={isEditingPromoPrice ? promoPriceDraft : (Number(field.value || 0) > 0 ? Number(field.value || 0).toFixed(2) : "")}
                                             className="h-7 border-none bg-transparent p-0 text-lg font-semibold tabular-nums text-emerald-700 focus-visible:ring-0 focus-visible:ring-offset-0"
                                             onFocus={() => {
                                                 setIsEditingPromoPrice(true);
@@ -830,7 +847,18 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                         <FormItem className="space-y-1">
                             <FormLabel className="flex h-4 items-center text-[11px] font-medium text-slate-500">Stock físico</FormLabel>
                             <FormControl>
-                                <Input type="number" inputMode="decimal" {...field} className="h-9 rounded-lg border-slate-200 bg-white text-xs font-medium tabular-nums text-slate-900" />
+                                <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                    {...field}
+                                    value={field.value === 0 ? "" : (field.value ?? "")}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        field.onChange(val === "" ? 0 : parseFloat(val) || 0);
+                                    }}
+                                    className="h-9 rounded-lg border-slate-200 bg-white text-xs font-medium tabular-nums text-slate-900"
+                                />
                             </FormControl>
                         </FormItem>
                     )} />
@@ -838,7 +866,18 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                         <FormItem className="space-y-1">
                             <FormLabel className="flex h-4 items-center text-[11px] font-medium text-amber-600">Reservado</FormLabel>
                             <FormControl>
-                                <Input type="number" inputMode="decimal" {...field} className="h-9 rounded-lg border-slate-200 bg-white text-xs font-medium tabular-nums text-slate-900" />
+                                <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                    {...field}
+                                    value={field.value === 0 ? "" : (field.value ?? "")}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        field.onChange(val === "" ? 0 : parseFloat(val) || 0);
+                                    }}
+                                    className="h-9 rounded-lg border-slate-200 bg-white text-xs font-medium tabular-nums text-slate-900"
+                                />
                             </FormControl>
                         </FormItem>
                     )} />
@@ -846,7 +885,18 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
                         <FormItem className="space-y-1">
                             <FormLabel className="flex h-4 items-center text-[11px] font-medium text-rose-600">Alerta mín.</FormLabel>
                             <FormControl>
-                                <Input type="number" inputMode="decimal" {...field} className="h-9 rounded-lg border-slate-200 bg-white text-xs font-medium tabular-nums text-slate-900" />
+                                <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                    {...field}
+                                    value={field.value === 0 ? "" : (field.value ?? "")}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        field.onChange(val === "" ? 0 : parseFloat(val) || 0);
+                                    }}
+                                    className="h-9 rounded-lg border-slate-200 bg-white text-xs font-medium tabular-nums text-slate-900"
+                                />
                             </FormControl>
                         </FormItem>
                     )} />

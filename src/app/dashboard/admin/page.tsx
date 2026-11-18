@@ -580,8 +580,15 @@ function UserEditDialog({
                                         type="number"
                                         min={1}
                                         max={20}
-                                        value={maxRegisters}
-                                        onChange={(e) => setMaxRegisters(Math.max(1, Number(e.target.value) || 1))}
+                                        placeholder="1"
+                                        value={maxRegisters === 0 ? "" : (maxRegisters ?? "")}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setMaxRegisters(val === "" ? 0 : Math.max(1, Number(val) || 1));
+                                        }}
+                                        onBlur={() => {
+                                            if (!maxRegisters || maxRegisters < 1) setMaxRegisters(1);
+                                        }}
                                         className="h-9 rounded-lg border-slate-200 bg-white text-xs font-semibold tabular-nums text-slate-900"
                                     />
                                 </div>
@@ -591,8 +598,12 @@ function UserEditDialog({
                                         type="number"
                                         min={0}
                                         max={50}
-                                        value={maxCashiers}
-                                        onChange={(e) => setMaxCashiers(Math.max(0, Number(e.target.value) || 0))}
+                                        placeholder="0"
+                                        value={maxCashiers === 0 ? "" : (maxCashiers ?? "")}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setMaxCashiers(val === "" ? 0 : Math.max(0, Number(val) || 0));
+                                        }}
                                         className="h-9 rounded-lg border-slate-200 bg-white text-xs font-semibold tabular-nums text-slate-900"
                                     />
                                 </div>

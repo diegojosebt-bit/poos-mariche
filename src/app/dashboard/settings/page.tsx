@@ -656,7 +656,13 @@ function SettingsContent() {
                                                             <Input
                                                                 type="number"
                                                                 step="0.0001"
+                                                                placeholder="0.00"
                                                                 {...field}
+                                                                value={field.value === 0 ? '' : (field.value ?? '')}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    field.onChange(val === '' ? 0 : parseFloat(val) || 0);
+                                                                }}
                                                                 className="h-9 rounded-lg border-slate-200 bg-white text-xs font-semibold tabular-nums text-emerald-700"
                                                             />
                                                         </FormControl>
@@ -675,7 +681,13 @@ function SettingsContent() {
                                                             <Input
                                                                 type="number"
                                                                 step="0.0001"
+                                                                placeholder="0.00"
                                                                 {...field}
+                                                                value={field.value === 0 ? '' : (field.value ?? '')}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    field.onChange(val === '' ? 0 : parseFloat(val) || 0);
+                                                                }}
                                                                 className="h-9 rounded-lg border-slate-200 bg-white text-xs font-semibold tabular-nums text-slate-900"
                                                             />
                                                         </FormControl>
@@ -693,7 +705,13 @@ function SettingsContent() {
                                                         <FormControl>
                                                             <Input
                                                                 type="number"
+                                                                placeholder="0"
                                                                 {...field}
+                                                                value={field.value === 0 ? '' : (field.value ?? '')}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    field.onChange(val === '' ? 0 : parseFloat(val) || 0);
+                                                                }}
                                                                 className="h-9 rounded-lg border-slate-200 bg-white text-xs font-semibold tabular-nums text-blue-700"
                                                             />
                                                         </FormControl>

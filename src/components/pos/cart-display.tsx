@@ -439,6 +439,83 @@ function DiscountItemControl({ productId, currentDiscount, onApply }: { productI
     );
 }
 
+/** Input numérico para cantidad en el carrito con auto-selección al enfocar y borrado libre sin bloqueo del 0. */
+function CartQuantityInput({
+    quantity,
+    disabled,
+    onUpdate,
+    className,
+    ariaLabel,
+}: {
+    quantity: number;
+    disabled?: boolean;
+    onUpdate: (qty: number) => void;
+    className?: string;
+    ariaLabel?: string;
+}) {
+    const [localVal, setLocalVal] = useState<string>(() => quantity.toString());
+
+    useEffect(() => {
+        setLocalVal(quantity.toString());
+    }, [quantity]);
+
+    const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+        try {
+            e.currentTarget.select();
+        } catch {}
+        const target = e.currentTarget;
+        if (typeof window !== "undefined") {
+            window.requestAnimationFrame(() => {
+                try {
+                    target.select();
+                } catch {}
+            });
+        }
+    };
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setLocalVal(val);
+        const parsed = parseFloat(val);
+        if (!isNaN(parsed) && parsed > 0) {
+            onUpdate(parsed);
+        }
+    };
+
+    const handleBlur = () => {
+        const parsed = parseFloat(localVal);
+        if (isNaN(parsed) || parsed <= 0) {
+            setLocalVal(quantity.toString());
+            onUpdate(quantity);
+        } else {
+            onUpdate(parsed);
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            (e.target as HTMLInputElement).blur();
+        }
+    };
+
+    return (
+        <input
+            type="number"
+            step="any"
+            inputMode="decimal"
+            enterKeyHint="done"
+            value={localVal}
+            onFocus={handleFocus}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            className={className}
+            disabled={disabled}
+            aria-label={ariaLabel}
+        />
+    );
+}
+
 /** Acciones de una línea del carrito (compartidas por tabla y tarjeta móvil). */
 function CartLineActions({
     item,
@@ -1180,16 +1257,12 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                             >
                                 <Minus className="h-3 w-3" />
                             </Button>
-                            <input
-                                type="number"
-                                step="any"
-                                inputMode="decimal"
-                                enterKeyHint="done"
-                                value={item.quantity}
-                                onChange={(e) => onUpdateQuantity(item.productId, Math.max(0.001, parseFloat(e.target.value) || 0))}
-                                className="h-7 w-12 rounded-lg border border-slate-200 bg-white text-slate-800 text-center text-xs font-semibold shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            <CartQuantityInput
+                                quantity={item.quantity}
                                 disabled={item.isRepair}
-                                aria-label={`Cantidad de ${item.name}`}
+                                onUpdate={(qty) => onUpdateQuantity(item.productId, qty)}
+                                className="h-7 w-12 rounded-lg border border-slate-200 bg-white text-slate-800 text-center text-xs font-semibold shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                ariaLabel={`Cantidad de ${item.name}`}
                             />
                             <Button
                                 type="button"
@@ -1280,15 +1353,12 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                                         >
                                             <Minus className="h-2.5 w-2.5" />
                                         </Button>
-                                        <input 
-                                            type="number" 
-                                            step="any"
-                                            inputMode="decimal"
-                                            enterKeyHint="done"
-                                            value={item.quantity} 
-                                            onChange={(e) => onUpdateQuantity(item.productId, Math.max(0.001, parseFloat(e.target.value) || 0))} 
-                                            className="w-10 border border-slate-200 bg-white text-slate-800 font-semibold rounded-md text-center text-xs h-6 shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-                                            disabled={item.isRepair} 
+                                        <CartQuantityInput
+                                            quantity={item.quantity}
+                                            disabled={item.isRepair}
+                                            onUpdate={(qty) => onUpdateQuantity(item.productId, qty)}
+                                            className="w-10 border border-slate-200 bg-white text-slate-800 font-semibold rounded-md text-center text-xs h-6 shadow-2xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                            ariaLabel={`Cantidad de ${item.name}`}
                                         />
                                         <Button
                                             type="button"
