@@ -251,6 +251,15 @@ export function CashiersManager() {
 
   // Abrir modal para crear o editar cajero
   const openCreateCashier = () => {
+    if (!hasOwnerPin) {
+      setShowOwnerPinEditor(true);
+      toast({
+        variant: "destructive",
+        title: "Define primero tu PIN de Administrador",
+        description: "Crea tu clave de administrador a la izquierda antes de registrar cajeros para proteger Configuración y Reportes.",
+      });
+      return;
+    }
     if (reachedCashierLimit) {
       toast({
         variant: "destructive",
@@ -270,25 +279,12 @@ export function CashiersManager() {
       name: cashier.name,
       pin: isHashedPin(cashier.pin) ? "" : cashier.pin,
       existingPin: cashier.pin,
-      role: cashier.role,
+      role: "cashier",
       active: cashier.active,
       permissions: { ...cashier.permissions },
     });
     setShowCashierPin(false);
     setDialogOpen(true);
-  };
-
-  const handleSelectRolePreset = (role: CashierRolePreset) => {
-    const preset = CASHIER_ROLE_PRESETS[role];
-    const allowedMods = preset.permissions.modules.filter((m) => enabledModules.includes(m));
-    setFormState((prev) => ({
-      ...prev,
-      role,
-      permissions: {
-        ...preset.permissions,
-        modules: allowedMods.length > 0 ? allowedMods : ["pos"],
-      },
-    }));
   };
 
   const toggleCashierModule = (moduleId: UserModule) => {
@@ -313,6 +309,14 @@ export function CashiersManager() {
     const cleanPin = formState.pin.trim();
     const keepingExistingPin = Boolean(formState.id && !cleanPin && formState.existingPin);
 
+    if (!formState.id && !hasOwnerPin) {
+      toast({
+        variant: "destructive",
+        title: "PIN de Administrador requerido",
+        description: "Configura primero tu PIN de Administrador antes de crear cajeros.",
+      });
+      return;
+    }
     if (cleanName.length < 2) {
       toast({
         variant: "destructive",
@@ -372,7 +376,7 @@ export function CashiersManager() {
                 ...c,
                 name: cleanName,
                 pin: finalPin,
-                role: formState.role,
+                role: "cashier" as CashierRolePreset,
                 active: formState.active,
                 permissions: formState.permissions,
               }
@@ -391,7 +395,7 @@ export function CashiersManager() {
           id: createCashierId(),
           name: cleanName,
           pin: finalPin,
-          role: formState.role,
+          role: "cashier",
           active: true,
           permissions: formState.permissions,
           createdAt: new Date().toISOString(),
@@ -474,13 +478,16 @@ export function CashiersManager() {
                     {limits.maxRegisters}
                   </p>
                   <p className="text-[10px] text-slate-400">
-                    {limits.isMultiRegister ? "Multi-caja activo" : "1 equipo a la vez"}
+                    {limits.isMultiRegister ? "Equipos cobrando a la vez" : "1 equipo cobrando a la vez"}
                   </p>
                 </div>
                 <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-2.5">
-                  <p className="text-[10px] text-slate-500">Cajeros usados</p>
+                  <p className="text-[10px] text-slate-500">Cajeros registrados</p>
                   <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900">
                     {cashiers.length} / {limits.maxCashiers}
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    Personas con PIN para turnos
                   </p>
                   <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-slate-200/80">
                     <div
@@ -493,6 +500,12 @@ export function CashiersManager() {
                   </div>
                 </div>
               </div>
+
+              <p className="rounded-xl border border-slate-200/70 bg-slate-50/70 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+                <strong className="font-semibold text-slate-800">Cómo funciona:</strong> todas las cajas abren con este mismo correo.{" "}
+                <strong className="font-semibold text-slate-700">Cajas</strong> son los equipos cobrando al mismo tiempo y{" "}
+                <strong className="font-semibold text-slate-700">Cajeros</strong> son las personas que se turnan con su PIN.
+              </p>
 
               <div className="space-y-1 border-t border-slate-100 pt-3">
                 <Label className="text-[11px] font-medium text-slate-600">Nombre de esta caja</Label>
@@ -526,8 +539,8 @@ export function CashiersManager() {
                   <Crown className="h-3.5 w-3.5" />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-[13px] font-semibold text-slate-900">PIN de Gerente</h2>
-                  <p className="text-[11px] text-slate-500">Clave maestra del dueño</p>
+                  <h2 className="text-[13px] font-semibold text-slate-900">PIN de Administrador</h2>
+                  <p className="text-[11px] text-slate-500">Clave maestra del dueño único</p>
                 </div>
               </div>
               {hasOwnerPin ? (
@@ -720,9 +733,9 @@ export function CashiersManager() {
           </div>
 
           <div className="space-y-2.5 p-4">
-            {!hasOwnerPin && cashiers.length > 0 && (
+            {!hasOwnerPin && (
               <div className="rounded-xl border border-amber-200/80 bg-amber-50/70 px-3.5 py-2.5 text-xs text-amber-800">
-                <strong>Recomendación:</strong> define tu <strong>PIN de Gerente</strong> a la izquierda para evitar que un cajero cambie al perfil de Dueño sin clave.
+                <strong>Paso obligatorio:</strong> define primero tu <strong>PIN de Administrador</strong> a la izquierda antes de agregar cajeros. Todas las cajas inician con este correo y cada cajero entra solo con su PIN.
               </div>
             )}
 
@@ -750,7 +763,6 @@ export function CashiersManager() {
             ) : (
               <div className="space-y-2.5">
                 {cashiers.map((cashier) => {
-                  const roleInfo = CASHIER_ROLE_PRESETS[cashier.role] || CASHIER_ROLE_PRESETS.cashier;
                   return (
                     <div
                       key={cashier.id}
@@ -778,7 +790,7 @@ export function CashiersManager() {
                               {cashier.name}
                             </span>
                             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                              {roleInfo.label}
+                              Cajero
                             </span>
                             {!cashier.active && (
                               <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
@@ -788,8 +800,10 @@ export function CashiersManager() {
                           </div>
                           <p className="truncate text-[11px] text-slate-500">
                             {cashier.permissions.modules.length} módulos
+                            {cashier.permissions.canGiveDiscounts ? " · Descuentos" : ""}
                             {cashier.permissions.canEditProducts ? " · Edita productos" : ""}
                             {cashier.permissions.canDeleteRecords ? " · Puede anular" : ""}
+                            {cashier.permissions.canViewCostsAndProfits ? " · Ve costos" : ""}
                           </p>
                         </div>
                       </div>
@@ -901,37 +915,6 @@ export function CashiersManager() {
               </div>
             </div>
 
-            {/* Plantilla rápida de rol */}
-            <div className="space-y-2">
-              <Label className="text-xs font-medium text-slate-700">Plantilla rápida de rol</Label>
-              <div className="grid grid-cols-3 gap-2">
-                {(["cashier", "technician", "manager"] as CashierRolePreset[]).map((roleId) => {
-                  const preset = CASHIER_ROLE_PRESETS[roleId];
-                  const active = formState.role === roleId;
-                  return (
-                    <button
-                      key={roleId}
-                      type="button"
-                      onClick={() => handleSelectRolePreset(roleId)}
-                      className={cn(
-                        "rounded-xl border px-2.5 py-2 text-left transition-all",
-                        active
-                          ? "border-blue-500 bg-blue-50/40 ring-1 ring-blue-500/25"
-                          : "border-slate-200/80 bg-white hover:bg-slate-50"
-                      )}
-                    >
-                      <p className={cn("text-xs font-semibold", active ? "text-blue-700" : "text-slate-800")}>
-                        {preset.label}
-                      </p>
-                      <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-slate-500">
-                        {preset.description}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Módulos permitidos */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -977,14 +960,24 @@ export function CashiersManager() {
               <div className="space-y-2.5 pt-1">
                 {[
                   {
+                    key: "canGiveDiscounts" as const,
+                    label: "Aplicar descuentos, ofertas u obsequios en POS",
+                    hint: "Sin esto, cobra siempre a precio de lista sin rebajas ni obsequios.",
+                  },
+                  {
                     key: "canEditProducts" as const,
                     label: "Editar precios y stock en Inventario",
-                    hint: "Sin esto, necesita PIN de Gerente para editar productos.",
+                    hint: "Sin esto, necesita PIN de Administrador para editar productos.",
                   },
                   {
                     key: "canDeleteRecords" as const,
                     label: "Anular ventas o eliminar registros",
-                    hint: "Sin esto, necesita PIN de Gerente para reembolsos o borrados.",
+                    hint: "Sin esto, necesita PIN de Administrador para reembolsos o borrados.",
+                  },
+                  {
+                    key: "canViewCostsAndProfits" as const,
+                    label: "Ver costos de compra y ganancias reales",
+                    hint: "Sin esto, se ocultan costos y utilidades en Inventario y Reportes.",
                   },
                   {
                     key: "canViewAllCashiersReports" as const,

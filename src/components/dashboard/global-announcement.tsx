@@ -6,6 +6,8 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight, Info, Megaphone } from
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import { useDoc, useFirebase, useMemoFirebase } from "@/firebase";
+import { useDashboardStore } from "@/contexts/dashboard-context";
+import { hasCashierSystemActive } from "@/lib/cashiers";
 import {
   Dialog,
   DialogContent,
@@ -79,10 +81,16 @@ function formatNoticeDate(iso?: string): string | null {
 
 export function GlobalAnnouncement() {
   const { firestore, user } = useFirebase();
+  const { profile, activeOperator, isOperatorPromptOpen } = useDashboardStore();
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [seenKeys, setSeenKeys] = useState<string[]>([]);
   const [seenLoaded, setSeenLoaded] = useState(false);
+
+  // Nunca abrir el Dialog mientras la pantalla de selección de cajero/dueño esté activa
+  // (evita que Radix ponga `body { pointer-events: none }` bloqueando los toques en móvil).
+  const isOperatorOverlayActive =
+    hasCashierSystemActive(profile) && (!activeOperator || isOperatorPromptOpen);
 
   const announcementRef = useMemoFirebase(
     () => (firestore ? doc(firestore, "system", "announcements") : null),
@@ -118,10 +126,14 @@ export function GlobalAnnouncement() {
 
   useEffect(() => {
     if (!seenLoaded) return;
+    if (isOperatorOverlayActive) {
+      setOpen(false);
+      return;
+    }
     setPage(0);
     setOpen(unseen.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unseenSignature, seenLoaded]);
+  }, [unseenSignature, seenLoaded, isOperatorOverlayActive]);
 
   const safePage = Math.min(page, Math.max(0, unseen.length - 1));
   const current: AnnouncementItem | undefined = unseen[safePage];

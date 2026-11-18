@@ -3,7 +3,7 @@
 import { cleanObject } from "@/lib/json-guard";
 import type { CartItem, Payment, Product, Sale, RepairJob, ReservedPart } from "@/lib/types";
 import { Button } from "../ui/button";
-import { Trash2, TicketPercent, Gift, ParkingSquare, UserPlus, UserX, UserCheck, User, Search, BadgePercent, Tag, ShoppingCart, ArrowRight, ArrowLeft } from "lucide-react";
+import { Trash2, TicketPercent, Gift, ParkingSquare, UserPlus, UserX, UserCheck, User, Search, BadgePercent, Tag, ShoppingCart, ArrowRight, ArrowLeft, ShieldAlert } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { CheckoutDialog } from "./checkout-dialog";
 import { useCurrency } from "@/hooks/use-currency";
@@ -11,7 +11,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { useFirebase, useDoc, useMemoFirebase, useCollection } from "@/firebase";
 import { doc, writeBatch, runTransaction, collection, query, orderBy, increment, serverTimestamp, getDocs, where, limit } from "firebase/firestore";
-import { getEffectivePlanLimits, OWNER_OPERATOR_ID } from "@/lib/cashiers";
+import { canOperatorPerform, getEffectivePlanLimits, OWNER_OPERATOR_ID } from "@/lib/cashiers";
 import { fetchDocsByIds } from '@/lib/firestore/fetch-by-ids';
 import { dailyRef, monthlyRef, saleStatsWrites } from '@/lib/firestore/rollups';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
@@ -30,9 +30,25 @@ import { useDashboardStore } from "@/contexts/dashboard-context";
 import { enqueueOfflineOperation } from "@/lib/offline-sync-manager";
 import { SmoothCollapse } from "@/components/ui/smooth-collapse";
 
+const SALE_ID_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+function randomSaleSuffix(length = 6): string {
+    if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
+        const bytes = new Uint8Array(length);
+        window.crypto.getRandomValues(bytes);
+        return Array.from(bytes, (b) => SALE_ID_ALPHABET[b % SALE_ID_ALPHABET.length]).join("");
+    }
+    let out = "";
+    for (let i = 0; i < length; i++) {
+        out += SALE_ID_ALPHABET[Math.floor(Math.random() * SALE_ID_ALPHABET.length)];
+    }
+    return out;
+}
+
 function generateSaleId() {
     const date = new Date();
-    return `S-${format(date, "yyMMdd")}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const timePart = Date.now().toString(36).slice(-3).toUpperCase();
+    return `S-${format(date, "yyMMdd")}-${timePart}${randomSaleSuffix(5)}`;
 }
 
 function CustomerDialog({ onSave, currentName, currentID }: { onSave: (name: string, id: string) => void, currentName: string, currentID: string }) {
@@ -427,6 +443,7 @@ function DiscountItemControl({ productId, currentDiscount, onApply }: { productI
 function CartLineActions({
     item,
     hasPromoAvailable,
+    canGiveDiscounts = true,
     onTogglePromo,
     onToggleGift,
     onRemoveItem,
@@ -435,6 +452,7 @@ function CartLineActions({
 }: {
     item: CartItem;
     hasPromoAvailable: boolean;
+    canGiveDiscounts?: boolean;
     onTogglePromo: (productId: string) => void;
     onToggleGift: (productId: string) => void;
     onRemoveItem: (productId: string, isRepair?: boolean) => void;
@@ -446,7 +464,7 @@ function CartLineActions({
     return (
         <div className="flex items-center gap-0.5">
             <TooltipProvider>
-                {hasPromoAvailable && !item.isCustom && (
+                {canGiveDiscounts && hasPromoAvailable && !item.isCustom && (
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
@@ -463,7 +481,7 @@ function CartLineActions({
                     </Tooltip>
                 )}
 
-                {!item.isRepair && (
+                {canGiveDiscounts && !item.isRepair && (
                     <>
                         <DiscountItemControl
                             productId={item.productId}
@@ -527,7 +545,16 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
   const { firestore, user } = useFirebase();
   const { toast } = useToast();
   const { format: formatCurrency, getFinalPrice, getSymbol, convert, bcvRate, parallelRate } = useCurrency();
-  const { updateCachedItem, addItemToCache, profile, activeOperator, registerName } = useDashboardStore();
+  const {
+    updateCachedItem,
+    addItemToCache,
+    profile,
+    activeOperator,
+    registerName,
+    isSupervisorMode,
+    supervisorRegisterHolder,
+  } = useDashboardStore();
+  const canGiveDiscounts = canOperatorPerform(activeOperator, 'canGiveDiscounts');
   
   const [customerName, setCustomerName] = useState("");
   const [customerID, setCustomerID] = useState("");
@@ -588,6 +615,15 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
 
   const handleCheckout = async (payments: Payment[], changeGiven: Payment[], totalChangeInUSD: number): Promise<Sale | null> => {
       if (!firestore || !user) return null;
+
+      if (isSupervisorMode) {
+          toast({
+              variant: "destructive",
+              title: "Modo Supervisor activo",
+              description: `La caja está en uso por ${supervisorRegisterHolder || 'un cajero'}. Tu plan permite 1 caja cobrando a la vez.`,
+          });
+          return null;
+      }
 
       // Catálogo paginado: si algún artículo no está en RAM, se trae por id
       // para no registrar costo 0 ni saltarse la validación de stock.
@@ -1149,6 +1185,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                                 <CartLineActions
                                     item={item}
                                     hasPromoAvailable={hasPromoAvailable}
+                                    canGiveDiscounts={canGiveDiscounts}
                                     onTogglePromo={onTogglePromo}
                                     onToggleGift={onToggleGift}
                                     onRemoveItem={onRemoveItem}
@@ -1229,6 +1266,7 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                                     <CartLineActions
                                         item={item}
                                         hasPromoAvailable={hasPromoAvailable}
+                                        canGiveDiscounts={canGiveDiscounts}
                                         onTogglePromo={onTogglePromo}
                                         onToggleGift={onToggleGift}
                                         onRemoveItem={onRemoveItem}
@@ -1258,11 +1296,23 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
             </div>
         </div>
 
+        {isSupervisorMode && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-amber-200/90 bg-amber-50/80 px-3 py-2.5 text-xs text-amber-900">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <div className="min-w-0 leading-snug">
+                    <p className="font-semibold">Modo Supervisor activo</p>
+                    <p className="text-[11px] text-amber-800">
+                        Caja en uso por <strong>{supervisorRegisterHolder || 'cajero activo'}</strong>. Tu plan permite 1 caja cobrando a la vez; puedes consultar el resto del sistema normalmente.
+                    </p>
+                </div>
+            </div>
+        )}
+
         <Button 
             type="button"
             size="lg" 
             onClick={() => {
-                if (cart.length === 0) return;
+                if (cart.length === 0 || isSupervisorMode) return;
                 const hasAssignedCustomer = Boolean(customerName.trim() || customerID.trim());
                 const isRepairWithCustomer = Boolean(repairJobId && cart.some(i => i.isRepair) && activeRepairJob?.customerName);
                 if (hasAssignedCustomer || isRepairWithCustomer) {
@@ -1272,10 +1322,12 @@ export function CartDisplay({ cart, allProducts, onUpdateQuantity, onUpdateDisco
                 }
             }}
             className="h-11 w-full text-sm font-medium rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-sm shadow-emerald-500/25 active:scale-[0.99] transition-all flex items-center justify-center gap-2" 
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || isSupervisorMode}
         >
-            <span>Pagar Compra</span>
-            <span className="text-xs font-normal opacity-90">({cartCount} {cartCount === 1 ? 'artículo' : 'artículos'})</span>
+            <span>{isSupervisorMode ? 'Cobro pausado (Modo Supervisor)' : 'Pagar Compra'}</span>
+            {!isSupervisorMode && (
+                <span className="text-xs font-normal opacity-90">({cartCount} {cartCount === 1 ? 'artículo' : 'artículos'})</span>
+            )}
         </Button>
 
         <PreCheckoutCustomerDialog

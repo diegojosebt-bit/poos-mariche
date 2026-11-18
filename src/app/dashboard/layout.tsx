@@ -4,10 +4,10 @@ import type { ActiveOperator, ActiveRegisterSession, UserProfile, AppSettings } 
 import { SidebarNav } from '@/components/sidebar-nav';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { useFirebase } from '@/firebase';
-import { doc, onSnapshot, getDocFromServer, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDocFromServer, updateDoc, deleteField } from 'firebase/firestore';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, Clock, Lock, LogOut, MessageCircle, RefreshCw, Loader2, MonitorSmartphone } from 'lucide-react';
+import { AlertTriangle, Clock, Lock, LogOut, MessageCircle, RefreshCw, Loader2, MonitorSmartphone, Users } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { isAfter, parseISO, differenceInMinutes, differenceInHours, format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -20,7 +20,7 @@ import { OfflineSyncPill } from '@/components/offline/offline-sync-pill';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { DashboardProvider, useDashboardStore } from '@/contexts/dashboard-context';
 import { DraftModalsProvider, DraftRestorePill } from '@/contexts/draft-modals-context';
-import { getEffectivePlanLimits } from '@/lib/cashiers';
+import { getEffectivePlanLimits, hasCashierSystemActive } from '@/lib/cashiers';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { ExchangeRateReminder } from '@/components/dashboard/exchange-rate-reminder';
@@ -28,10 +28,12 @@ import { ExchangeRateReminder } from '@/components/dashboard/exchange-rate-remin
 const SESSION_KEY = 'mm_session_id';
 const DEVICE_ID_KEY = 'mm_device_id';
 
+const VALID_DEVICE_ID_RE = /^[a-zA-Z0-9_-]{6,64}$/;
+
 function getOrCreateDeviceId(): string {
     if (typeof window === 'undefined') return 'server';
     let id = localStorage.getItem(DEVICE_ID_KEY);
-    if (!id) {
+    if (!id || !VALID_DEVICE_ID_RE.test(id)) {
         id = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         localStorage.setItem(DEVICE_ID_KEY, id);
     }
@@ -42,14 +44,17 @@ function buildDeviceSession(
     deviceId: string,
     deviceName: string,
     operator: ActiveOperator | null,
+    mode: 'register' | 'supervisor' = 'register',
 ): ActiveRegisterSession {
     const session: ActiveRegisterSession = {
         deviceId,
         deviceName: deviceName || 'Caja Principal',
+        mode,
         lastSeenAt: new Date().toISOString(),
     };
     if (operator?.id) session.cashierId = operator.id;
     if (operator?.name) session.cashierName = operator.name;
+    if (operator) session.isOwner = operator.isOwner;
     return session;
 }
 
@@ -70,6 +75,8 @@ function getFreshSessions(
                 if (session.deviceName) cleaned.deviceName = session.deviceName;
                 if (session.cashierId) cleaned.cashierId = session.cashierId;
                 if (session.cashierName) cleaned.cashierName = session.cashierName;
+                if (typeof session.isOwner === 'boolean') cleaned.isOwner = session.isOwner;
+                if (session.mode === 'register' || session.mode === 'supervisor') cleaned.mode = session.mode;
                 fresh[key] = cleaned;
             }
         } catch {
@@ -100,6 +107,8 @@ function LicenseExpiredScreen({ profile }: { profile: UserProfile | null }) {
     
     const handleSignOut = () => {
         localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem('mm_active_operator_id');
+        sessionStorage.removeItem('mm_active_operator_id');
         sessionStorage.removeItem('mm_security_unlocked');
         auth && signOut(auth);
     };
@@ -182,13 +191,17 @@ function RegisterLimitScreen({
     profile,
     activeSessions,
     maxRegisters,
+    canSwitchToOwner,
     onTakeSlot,
+    onSwitchOperator,
     onSignOut,
 }: {
     profile: UserProfile;
     activeSessions: ActiveRegisterSession[];
     maxRegisters: number;
+    canSwitchToOwner: boolean;
     onTakeSlot: (replaceDeviceId: string) => void;
+    onSwitchOperator: () => void;
     onSignOut: () => void;
 }) {
     return (
@@ -213,7 +226,10 @@ function RegisterLimitScreen({
                 <div className="space-y-4 p-5">
                     <p className="text-xs leading-relaxed text-slate-600">
                         Tu plan actual permite hasta <strong>{maxRegisters}</strong>{" "}
-                        {maxRegisters === 1 ? "caja abierta" : "cajas abiertas"} al mismo tiempo. Libera una caja inactiva para usar este equipo o amplía tu plan.
+                        {maxRegisters === 1 ? "equipo cobrando" : "equipos cobrando"} al mismo tiempo.{" "}
+                        {canSwitchToOwner
+                            ? "Si eres el administrador, puedes entrar en Modo Supervisor sin cerrar la caja activa, o liberar un cupo."
+                            : "Libera una caja inactiva para usar este equipo o amplía tu plan."}
                     </p>
 
                     <div className="space-y-2">
@@ -246,15 +262,28 @@ function RegisterLimitScreen({
                         ))}
                     </div>
 
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={onSignOut}
-                        className="h-9 w-full rounded-xl text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                    >
-                        <LogOut className="mr-2 h-4 w-4" />
-                        Cerrar sesión
-                    </Button>
+                    <div className="space-y-2 pt-1">
+                        {canSwitchToOwner && (
+                            <Button
+                                type="button"
+                                onClick={onSwitchOperator}
+                                className="h-9 w-full rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 text-xs font-semibold text-white shadow-sm hover:opacity-95"
+                            >
+                                <Users className="mr-2 h-4 w-4" />
+                                Cambiar a Dueño / Cajero
+                            </Button>
+                        )}
+
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={onSignOut}
+                            className="h-9 w-full rounded-xl text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                        >
+                            <LogOut className="mr-2 h-4 w-4" />
+                            Cerrar sesión
+                        </Button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -266,112 +295,211 @@ function RegisterLimitScreen({
  */
 function DashboardInitializer({ children }: { children: ReactNode }) {
     const { firestore, user, auth } = useFirebase();
-    const { setSettings, setProfile, profile, settings, registerName, activeOperator } = useDashboardStore();
-    const [isSessionValidating, setIsSessionValidating] = useState(true);
+    const {
+        setSettings,
+        setProfile,
+        profile,
+        settings,
+        registerName,
+        activeOperator,
+        clearActiveOperator,
+        setIsSupervisorMode,
+        setSupervisorRegisterHolder,
+    } = useDashboardStore();
     const [isSettingsLoading, setIsSettingsLoading] = useState(true);
     const [isProfileLoading, setIsProfileLoading] = useState(true);
     const [registerLimitBlocked, setRegisterLimitBlocked] = useState<{
         sessions: ActiveRegisterSession[];
         maxRegisters: number;
     } | null>(null);
-    const registeredSlotRef = useRef(false);
+    const lastSyncedSlotSigRef = useRef<string | null>(null);
 
-    // 1. LISTENER ÚNICO DE PERFIL Y SESIÓN (Blindaje Máximo: 1 sola suscripción para toda la App)
+    // 1. LISTENER ÚNICO DE PERFIL (1 sola suscripción para toda la App; nunca expulsa antes de elegir operador)
     useEffect(() => {
-        if (!firestore || !user || !auth) return;
-        registeredSlotRef.current = false;
+        if (!firestore || !user) return;
+        lastSyncedSlotSigRef.current = null;
         const pRef = doc(firestore, 'users', user.uid);
-        const deviceId = getOrCreateDeviceId();
 
-        const unsubscribe = onSnapshot(pRef, async (snap) => {
+        const unsubscribe = onSnapshot(pRef, (snap) => {
             if (snap.exists()) {
                 const data = snap.data();
-                const nextProfile = { ...data, id: snap.id } as UserProfile;
-                setProfile(nextProfile);
-
-                if (!snap.metadata.hasPendingWrites) {
-                    const limits = getEffectivePlanLimits(nextProfile);
-
-                    if (limits.isMultiRegister) {
-                        // MODO MULTI-CAJA: gestiona cupos simultáneos (`activeSessions`) hasta `maxRegisters`
-                        const fresh = getFreshSessions(nextProfile.activeSessions);
-                        const hasMySlot = Boolean(fresh[deviceId]);
-                        const count = Object.keys(fresh).length;
-
-                        if (hasMySlot) {
-                            setRegisterLimitBlocked(null);
-                            if (!registeredSlotRef.current) {
-                                registeredSlotRef.current = true;
-                                void updateDoc(pRef, {
-                                    activeSessions: {
-                                        ...fresh,
-                                        [deviceId]: buildDeviceSession(deviceId, registerName, activeOperator),
-                                    },
-                                }).catch((err) => {
-                                    console.warn('[Multi-Caja] No se pudo actualizar la sesión:', err);
-                                });
-                            }
-                        } else if (count < limits.maxRegisters) {
-                            setRegisterLimitBlocked(null);
-                            registeredSlotRef.current = true;
-                            void updateDoc(pRef, {
-                                activeSessions: {
-                                    ...fresh,
-                                    [deviceId]: buildDeviceSession(deviceId, registerName, activeOperator),
-                                },
-                            }).catch((err) => {
-                                console.warn('[Multi-Caja] No se pudo registrar la sesión:', err);
-                            });
-                        } else {
-                            setRegisterLimitBlocked({
-                                sessions: Object.values(fresh),
-                                maxRegisters: limits.maxRegisters,
-                            });
-                        }
-                    } else {
-                        // MODO 1 CAJA: mantiene el blindaje de sesión única (`lastSessionId`)
-                        setRegisterLimitBlocked(null);
-                        const localSessionId = localStorage.getItem(SESSION_KEY);
-                        if (!localSessionId && data.lastSessionId) {
-                            localStorage.setItem(SESSION_KEY, data.lastSessionId);
-                        } else if (localSessionId && data.lastSessionId && localSessionId !== data.lastSessionId) {
-                            localStorage.removeItem(SESSION_KEY);
-                            sessionStorage.removeItem('mm_security_unlocked');
-                            sessionStorage.removeItem('mm_active_operator_id');
-                            await signOut(auth);
-                            window.location.href = '/';
-                            return;
-                        }
-                    }
-                }
+                setProfile({ ...data, id: snap.id } as UserProfile);
             }
             setIsProfileLoading(false);
-            setIsSessionValidating(false);
         }, (err) => {
-            console.error("Profile & session sync error:", err);
+            console.error("Profile sync error:", err);
             setIsProfileLoading(false);
-            setIsSessionValidating(false);
         });
         return () => unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [firestore, user, auth, setProfile]);
+    }, [firestore, user, setProfile]);
+
+    // 1B. GESTIÓN DE SESIONES POR DISPOSITIVO (Camino 2 Híbrido: Modo Caja + Modo Supervisor del Dueño)
+    useEffect(() => {
+        if (!firestore || !user || !profile) return;
+
+        const cashierMode = hasCashierSystemActive(profile);
+        // Esperar primero a que el usuario seleccione Dueño o Cajero (nunca cerrar ni bloquear antes)
+        if (cashierMode && !activeOperator) {
+            lastSyncedSlotSigRef.current = null;
+            setRegisterLimitBlocked(null);
+            setIsSupervisorMode(false);
+            setSupervisorRegisterHolder(null);
+            return;
+        }
+
+        const effectiveOperator = activeOperator;
+        if (!effectiveOperator) return;
+
+        const pRef = doc(firestore, 'users', user.uid);
+        const deviceId = getOrCreateDeviceId();
+        const limits = getEffectivePlanLimits(profile);
+        const rawSessions = profile.activeSessions || {};
+        const fresh = getFreshSessions(rawSessions);
+        const staleSessionKeys = Object.keys(rawSessions).filter((k) => !fresh[k]);
+        const otherRegisters = Object.values(fresh).filter(
+            (s) => s.deviceId !== deviceId && s.mode !== 'supervisor',
+        );
+
+        const syncMySession = (
+            mode: 'register' | 'supervisor',
+            extraPatch?: Record<string, any>,
+        ) => {
+            const extraSig = extraPatch ? Object.keys(extraPatch).sort().join(',') : '';
+            const sig = `${deviceId}|${mode}|${effectiveOperator.id}|${effectiveOperator.name}|${registerName}|${extraSig}`;
+            const currentOnServer = fresh[deviceId];
+            const serverMatches =
+                Boolean(currentOnServer) &&
+                (currentOnServer.mode || 'register') === mode &&
+                currentOnServer.cashierId === effectiveOperator.id &&
+                currentOnServer.cashierName === effectiveOperator.name &&
+                (currentOnServer.deviceName || 'Caja Principal') === (registerName || 'Caja Principal') &&
+                !extraPatch;
+
+            if (serverMatches) {
+                lastSyncedSlotSigRef.current = sig;
+                return;
+            }
+            if (lastSyncedSlotSigRef.current === sig) return;
+
+            // Blindaje Multi-Caja: actualiza solo la clave de este dispositivo (`activeSessions.${deviceId}`)
+            // para no pisar sesiones de otras cajas que abran en el mismo instante.
+            const patch: Record<string, any> = {
+                [`activeSessions.${deviceId}`]: buildDeviceSession(deviceId, registerName, effectiveOperator, mode),
+                ...(extraPatch || {}),
+            };
+            for (const staleKey of staleSessionKeys) {
+                if (staleKey !== deviceId) {
+                    patch[`activeSessions.${staleKey}`] = deleteField();
+                }
+            }
+
+            lastSyncedSlotSigRef.current = sig;
+            void updateDoc(pRef, patch).catch((err) => {
+                lastSyncedSlotSigRef.current = null;
+                console.warn('[Sesiones] No se pudo sincronizar la sesión del dispositivo:', err);
+            });
+        };
+
+        // Caso A: Hay cupo disponible en maxRegisters → este dispositivo opera como Caja completa
+        if (otherRegisters.length < limits.maxRegisters) {
+            setRegisterLimitBlocked(null);
+            setIsSupervisorMode(false);
+            setSupervisorRegisterHolder(null);
+            syncMySession('register');
+            return;
+        }
+
+        // Caso B: Cupo de cajas lleno, pero este equipo es el Dueño (con cajeros activos) → Modo Supervisor
+        if (effectiveOperator.isOwner && cashierMode) {
+            const holderLabel = otherRegisters
+                .map((s) => s.cashierName || s.deviceName || 'Caja activa')
+                .join(', ');
+            setRegisterLimitBlocked(null);
+            setIsSupervisorMode(true);
+            setSupervisorRegisterHolder(holderLabel || 'Cajero activo');
+            syncMySession('supervisor');
+            return;
+        }
+
+        // Caso C: Cupo lleno, entra un Cajero y uno de los cupos lo ocupaba el Dueño →
+        // el Dueño pasa automáticamente a Modo Supervisor (sigue abierto) y el Cajero toma la caja
+        const ownerHeldRegister = otherRegisters.find((s) => s.isOwner);
+        if (!effectiveOperator.isOwner && cashierMode && ownerHeldRegister) {
+            setRegisterLimitBlocked(null);
+            setIsSupervisorMode(false);
+            setSupervisorRegisterHolder(null);
+            syncMySession('register', {
+                [`activeSessions.${ownerHeldRegister.deviceId}.mode`]: 'supervisor',
+            });
+            return;
+        }
+
+        // Caso D: Todos los cupos de caja están ocupados por otros cajeros (o sin sistema de cajeros)
+        lastSyncedSlotSigRef.current = null;
+        setIsSupervisorMode(false);
+        setSupervisorRegisterHolder(null);
+        setRegisterLimitBlocked({
+            sessions: otherRegisters,
+            maxRegisters: limits.maxRegisters,
+        });
+    }, [
+        firestore,
+        user,
+        profile,
+        activeOperator,
+        registerName,
+        setIsSupervisorMode,
+        setSupervisorRegisterHolder,
+    ]);
 
     const handleTakeRegisterSlot = (replaceDeviceId: string) => {
         if (!firestore || !user || !profile) return;
         const pRef = doc(firestore, 'users', user.uid);
         const deviceId = getOrCreateDeviceId();
-        const fresh = getFreshSessions(profile.activeSessions);
-        delete fresh[replaceDeviceId];
-        fresh[deviceId] = buildDeviceSession(deviceId, registerName, activeOperator);
-        registeredSlotRef.current = true;
+        const rawSessions = profile.activeSessions || {};
+        const fresh = getFreshSessions(rawSessions);
+        const replaced = fresh[replaceDeviceId];
+        const patch: Record<string, any> = {
+            [`activeSessions.${deviceId}`]: buildDeviceSession(deviceId, registerName, activeOperator, 'register'),
+        };
+        if (replaced?.isOwner && hasCashierSystemActive(profile)) {
+            patch[`activeSessions.${replaceDeviceId}.mode`] = 'supervisor';
+        } else if (replaceDeviceId !== deviceId) {
+            patch[`activeSessions.${replaceDeviceId}`] = deleteField();
+        }
+        for (const staleKey of Object.keys(rawSessions)) {
+            if (!fresh[staleKey] && staleKey !== deviceId) {
+                patch[`activeSessions.${staleKey}`] = deleteField();
+            }
+        }
+        lastSyncedSlotSigRef.current = activeOperator
+            ? `${deviceId}|register|${activeOperator.id}|${activeOperator.name}|${registerName}|`
+            : null;
         setRegisterLimitBlocked(null);
-        void updateDoc(pRef, { activeSessions: fresh }).catch((err) => {
-            console.warn('[Multi-Caja] No se pudo reclamar el cupo de caja:', err);
+        setIsSupervisorMode(false);
+        setSupervisorRegisterHolder(null);
+        void updateDoc(pRef, patch).catch((err) => {
+            lastSyncedSlotSigRef.current = null;
+            console.warn('[Sesiones] No se pudo reclamar el cupo de caja:', err);
         });
     };
 
+    const handleSwitchFromLimit = () => {
+        clearActiveOperator();
+        setRegisterLimitBlocked(null);
+    };
+
     const handleSignOutFromLimit = async () => {
+        const deviceId = getOrCreateDeviceId();
+        if (firestore && user) {
+            try {
+                await updateDoc(doc(firestore, 'users', user.uid), {
+                    [`activeSessions.${deviceId}`]: deleteField(),
+                });
+            } catch {}
+        }
         localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem('mm_active_operator_id');
         sessionStorage.removeItem('mm_security_unlocked');
         sessionStorage.removeItem('mm_active_operator_id');
         if (auth) await signOut(auth);
@@ -399,7 +527,7 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
         return () => root.removeAttribute('data-text-scale');
     }, [settings?.largeText]);
 
-    if (isProfileLoading || isSessionValidating || isSettingsLoading) {
+    if (isProfileLoading || isSettingsLoading) {
         return (
             <div className="flex h-app items-center justify-center bg-slate-50">
                 <AppLogo className="h-16 w-16 animate-pulse opacity-80" />
@@ -421,7 +549,9 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
                 profile={profile}
                 activeSessions={registerLimitBlocked.sessions}
                 maxRegisters={registerLimitBlocked.maxRegisters}
+                canSwitchToOwner={hasCashierSystemActive(profile)}
                 onTakeSlot={handleTakeRegisterSlot}
+                onSwitchOperator={handleSwitchFromLimit}
                 onSignOut={handleSignOutFromLimit}
             />
         );

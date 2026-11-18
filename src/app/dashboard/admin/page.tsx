@@ -541,6 +541,10 @@ function UserEditDialog({
                                     {(user.cashiers || []).length} / {maxCashiers} cajeros creados
                                 </span>
                             </div>
+                            <p className="text-[11px] leading-snug text-slate-500">
+                                <strong className="font-medium text-slate-700">Cajas</strong> = equipos cobrando a la vez ·{" "}
+                                <strong className="font-medium text-slate-700">Cajeros</strong> = personas con PIN que rotan turnos.
+                            </p>
 
                             <div className="grid grid-cols-3 gap-2">
                                 {(['basic', 'multi', 'pro'] as PlanTier[]).map((tier) => {

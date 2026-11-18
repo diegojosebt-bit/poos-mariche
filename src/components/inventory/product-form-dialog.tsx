@@ -32,7 +32,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useFirebase, setDocumentNonBlocking, useCollection, useMemoFirebase, useDoc } from "@/firebase";
 import { useDashboardStore } from "@/contexts/dashboard-context";
 import { persistDraft } from "@/contexts/draft-modals-context";
-import { doc, collection, arrayUnion, query, limit } from "firebase/firestore";
+import { doc, collection, arrayUnion, query, limit, runTransaction } from "firebase/firestore";
 import { Check, ChevronDown, Calculator, Smartphone, Barcode, Tag, Scale, Lock, Percent, Landmark, Gift, BadgePercent, Sparkles, RefreshCcw, Loader2, Minimize2, Package, PackagePlus, Boxes, DollarSign } from "lucide-react";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -209,6 +209,7 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
   const hasIVA = form.watch("hasIVA");
   const hasDiscount = form.watch("hasDiscount");
   const isEditing = !!product;
+  const initialStockRef = useRef<{ stockLevel: number; reservedStock: number; damagedStock: number } | null>(null);
   
   const showRepairsFeature = profile?.enabledModules?.includes('repairs') ?? true;
 
@@ -227,6 +228,11 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
     if (open) {
         setIsSubmitting(false); 
         if (product) {
+            initialStockRef.current = {
+              stockLevel: Number(product.stockLevel) || 0,
+              reservedStock: Number(product.reservedStock) || 0,
+              damagedStock: Number(product.damagedStock) || 0,
+            };
             form.reset({
               ...product,
               name: (product.name || "").toUpperCase(),
@@ -236,6 +242,7 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
               compatibleModels: product.compatibleModels?.join(", ").toUpperCase() || "",
             });
         } else {
+            initialStockRef.current = null;
             const autoSKU = `SKU-${format(new Date(), "ddMMyy-HHmm")}`;
             form.reset({
                 name: "", category: "General", sku: autoSKU, barcode: "", unit: "unit",
@@ -288,14 +295,66 @@ export function ProductFormDialog({ product, children, productCount = 0, isOpen,
         const docId = product?.id || doc(collection(firestore, 'users', user.uid, 'products')).id;
         const productRef = doc(firestore, 'users', user.uid, 'products', docId);
         
-        const finalProduct = { ...finalValues, id: docId };
-        
-        // CRITICAL: Await the save operation to prevent race conditions during repair registrations
-        await setDocumentNonBlocking(productRef, finalProduct, { merge: true });
+        let savedProduct: any = { ...finalValues, id: docId };
+
+        if (isEditing && product?.id) {
+            const initial = initialStockRef.current || {
+                stockLevel: Number(product.stockLevel) || 0,
+                reservedStock: Number(product.reservedStock) || 0,
+                damagedStock: Number(product.damagedStock) || 0,
+            };
+            const stockDelta = Number(finalValues.stockLevel || 0) - initial.stockLevel;
+            const reservedDelta = Number(finalValues.reservedStock || 0) - initial.reservedStock;
+            const damagedDelta = Number(finalValues.damagedStock || 0) - initial.damagedStock;
+            const isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+
+            if (isOnline) {
+                // Blindaje Multi-Caja: aplica solo deltas de stock sobre el valor vivo del servidor
+                // para evitar revertir ventas hechas en otra caja mientras se editaba el producto.
+                savedProduct = await runTransaction(firestore, async (tx) => {
+                    const snap = await tx.get(productRef);
+                    if (!snap.exists()) {
+                        const fallbackDoc = { ...finalValues, id: docId };
+                        tx.set(productRef, fallbackDoc, { merge: true });
+                        return fallbackDoc;
+                    }
+                    const server = snap.data() as Product;
+                    const resolvedStock = stockDelta !== 0
+                        ? Math.max(0, (Number(server.stockLevel) || 0) + stockDelta)
+                        : (Number(server.stockLevel) || 0);
+                    const resolvedReserved = reservedDelta !== 0
+                        ? Math.max(0, (Number(server.reservedStock) || 0) + reservedDelta)
+                        : (Number(server.reservedStock) || 0);
+                    const resolvedDamaged = damagedDelta !== 0
+                        ? Math.max(0, (Number(server.damagedStock) || 0) + damagedDelta)
+                        : (Number(server.damagedStock) || 0);
+
+                    const mergedDoc = {
+                        ...finalValues,
+                        id: docId,
+                        stockLevel: resolvedStock,
+                        reservedStock: resolvedReserved,
+                        damagedStock: resolvedDamaged,
+                        salesCount: Number(server.salesCount ?? finalValues.salesCount ?? 0),
+                    };
+                    tx.set(productRef, mergedDoc, { merge: true });
+                    return mergedDoc;
+                });
+            } else {
+                const { salesCount: _omitSalesCount, ...offlinePatch } = finalValues as any;
+                if (stockDelta === 0) delete offlinePatch.stockLevel;
+                if (reservedDelta === 0) delete offlinePatch.reservedStock;
+                if (damagedDelta === 0) delete offlinePatch.damagedStock;
+                await setDocumentNonBlocking(productRef, { ...offlinePatch, id: docId }, { merge: true });
+            }
+        } else {
+            // CRITICAL: Await the save operation to prevent race conditions during repair registrations
+            await setDocumentNonBlocking(productRef, savedProduct, { merge: true });
+        }
         
         toast({ title: isEditing ? "Producto Actualizado" : "Producto Añadido" });
         
-        if (onSaved) onSaved(finalProduct as any);
+        if (onSaved) onSaved(savedProduct);
         
         setIsSubmitting(false);
         setOpen(false);

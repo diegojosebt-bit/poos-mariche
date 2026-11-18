@@ -55,6 +55,7 @@ export function ReportsView({
 
     const cashierMode = hasCashierSystemActive(profile);
     const canViewAll = !cashierMode || !activeOperator || activeOperator.isOwner || canOperatorPerform(activeOperator, 'canViewAllCashiersReports');
+    const canViewCostsAndProfits = !cashierMode || canOperatorPerform(activeOperator, 'canViewCostsAndProfits');
     const [selectedCashierFilter, setSelectedCashierFilter] = useState<string>('all');
 
     // Lista de operadores para el filtro rápido del Dueño / Encargado (0 lecturas extra)
@@ -189,6 +190,8 @@ export function ReportsView({
                     reconciliations={visibleReconciliations}
                     exchanges={exchanges || []}
                     isLoading={isLoading || reconciliationsLoading}
+                    isFilteredByCashier={cashierMode && effectiveFilter !== 'all'}
+                    canViewCostsAndProfits={canViewCostsAndProfits}
                 />
                 {canViewAll && (
                     <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm flex flex-col gap-3.5 lg:flex-row lg:items-center lg:justify-between">

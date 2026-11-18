@@ -137,7 +137,7 @@ export function hasCashierSystemActive(profile: UserProfile | null | undefined):
 export function buildOwnerOperator(profile: UserProfile | null | undefined): ActiveOperator {
   return {
     id: OWNER_OPERATOR_ID,
-    name: profile?.accountName?.trim() || 'Dueño',
+    name: profile?.accountName?.trim() || 'Administrador',
     isOwner: true,
   };
 }

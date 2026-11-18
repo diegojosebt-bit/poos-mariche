@@ -7,7 +7,7 @@ import { usePwaInstall } from "@/contexts/pwa-install-context";
 import { Button } from "../ui/button";
 import { useState, useEffect, useRef } from "react";
 import { useFirebase, setDocumentNonBlocking } from "@/firebase";
-import { doc } from "firebase/firestore";
+import { doc, updateDoc, deleteField } from "firebase/firestore";
 import type { AppSettings } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -63,6 +63,8 @@ function AccountMenu({
     operatorName,
     operatorIsOwner,
     showCashierSwitch,
+    isSupervisorMode,
+    supervisorHolder,
     onSwitchOperator,
     onLockScreen,
     onSignOut,
@@ -73,6 +75,8 @@ function AccountMenu({
     operatorName?: string | null;
     operatorIsOwner?: boolean;
     showCashierSwitch?: boolean;
+    isSupervisorMode?: boolean;
+    supervisorHolder?: string | null;
     onSwitchOperator?: () => void;
     onLockScreen?: () => void;
     onSignOut: () => void | Promise<void>;
@@ -117,7 +121,7 @@ function AccountMenu({
                 <DropdownMenuLabel className="font-normal px-2.5 py-2">
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                         {showCashierSwitch
-                            ? (operatorIsOwner ? "Turno · Gerente" : "Turno · Cajero")
+                            ? (operatorIsOwner ? "Turno · Administrador" : "Turno · Cajero")
                             : "Sesión Activa"}
                     </p>
                     <p className="mt-0.5 truncate text-xs font-semibold text-slate-900">
@@ -125,6 +129,12 @@ function AccountMenu({
                     </p>
                     {showCashierSwitch && email && (
                         <p className="truncate text-[11px] text-slate-500">{email}</p>
+                    )}
+                    {isSupervisorMode && (
+                        <div className="mt-2 rounded-lg border border-amber-200/90 bg-amber-50/80 px-2 py-1.5 text-[11px] leading-snug text-amber-800">
+                            <span className="font-semibold">Modo Supervisor</span>
+                            {supervisorHolder ? ` · Caja en uso por ${supervisorHolder}` : ""}
+                        </div>
                     )}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-slate-100 my-1" />
@@ -177,6 +187,8 @@ export function ExchangeRateReminder() {
         activeOperator,
         clearActiveOperator,
         setIsOperatorPromptOpen,
+        isSupervisorMode,
+        supervisorRegisterHolder,
         setDesktopTopBarHost,
         setMobileTopBarHost,
     } = useDashboardStore();
@@ -186,7 +198,19 @@ export function ExchangeRateReminder() {
 
     const handleSignOut = async () => {
         try {
+            const deviceId = typeof window !== 'undefined' ? localStorage.getItem('mm_device_id') : null;
+            if (firestore && user && deviceId) {
+                try {
+                    await updateDoc(doc(firestore, 'users', user.uid), {
+                        [`activeSessions.${deviceId}`]: deleteField(),
+                    });
+                } catch {
+                    // Sin conexión o sin permisos: igual cerramos sesión local.
+                }
+            }
             localStorage.removeItem('mm_session_id');
+            localStorage.removeItem('mm_active_operator_id');
+            sessionStorage.removeItem('mm_active_operator_id');
             sessionStorage.removeItem('mm_security_unlocked');
             if (auth) await signOut(auth);
         } finally {
@@ -380,6 +404,8 @@ export function ExchangeRateReminder() {
                         operatorName={activeOperator?.name}
                         operatorIsOwner={activeOperator?.isOwner}
                         showCashierSwitch={cashierMode}
+                        isSupervisorMode={isSupervisorMode}
+                        supervisorHolder={supervisorRegisterHolder}
                         onSwitchOperator={() => setIsOperatorPromptOpen(true)}
                         onLockScreen={clearActiveOperator}
                         onSignOut={handleSignOut}
@@ -487,6 +513,8 @@ export function ExchangeRateReminder() {
                         operatorName={activeOperator?.name}
                         operatorIsOwner={activeOperator?.isOwner}
                         showCashierSwitch={cashierMode}
+                        isSupervisorMode={isSupervisorMode}
+                        supervisorHolder={supervisorRegisterHolder}
                         onSwitchOperator={() => setIsOperatorPromptOpen(true)}
                         onLockScreen={clearActiveOperator}
                         onSignOut={handleSignOut}

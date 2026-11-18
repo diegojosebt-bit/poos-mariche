@@ -41,6 +41,12 @@ type DashboardContextType = {
   registerName: string;
   setRegisterName: (name: string) => void;
 
+  // Modo Supervisor (Dueño monitoreando en vivo mientras el cupo de caja está ocupado por cajero)
+  isSupervisorMode: boolean;
+  setIsSupervisorMode: (value: boolean) => void;
+  supervisorRegisterHolder: string | null;
+  setSupervisorRegisterHolder: (holder: string | null) => void;
+
   // Gestión de Seguridad PIN (compatibilidad Modo Gerente)
   isSecurityUnlocked: boolean;
   unlockSecurity: () => void;
@@ -61,6 +67,8 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeOperator, setActiveOperator] = useState<ActiveOperator | null>(null);
   const [isOperatorPromptOpen, setIsOperatorPromptOpen] = useState(false);
+  const [isSupervisorMode, setIsSupervisorMode] = useState(false);
+  const [supervisorRegisterHolder, setSupervisorRegisterHolder] = useState<string | null>(null);
   const [registerName, setRegisterNameState] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem(REGISTER_NAME_KEY) || 'Caja Principal';
@@ -88,7 +96,10 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
     setActiveOperator(operator);
     setIsOperatorPromptOpen(false);
     if (typeof window !== 'undefined') {
-      sessionStorage.setItem(ACTIVE_OPERATOR_KEY, operator.id);
+      try {
+        localStorage.setItem(ACTIVE_OPERATOR_KEY, operator.id);
+        sessionStorage.setItem(ACTIVE_OPERATOR_KEY, operator.id);
+      } catch {}
       if (operator.isOwner) {
         sessionStorage.setItem('mm_security_unlocked', 'true');
       } else {
@@ -100,9 +111,14 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
 
   const clearActiveOperator = useCallback(() => {
     setActiveOperator(null);
+    setIsSupervisorMode(false);
+    setSupervisorRegisterHolder(null);
     if (typeof window !== 'undefined') {
-      sessionStorage.removeItem(ACTIVE_OPERATOR_KEY);
-      sessionStorage.removeItem('mm_security_unlocked');
+      try {
+        localStorage.removeItem(ACTIVE_OPERATOR_KEY);
+        sessionStorage.removeItem(ACTIVE_OPERATOR_KEY);
+        sessionStorage.removeItem('mm_security_unlocked');
+      } catch {}
     }
     setIsSecurityUnlocked(false);
   }, []);
@@ -121,7 +137,9 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
     }
 
     const storedId =
-      typeof window !== 'undefined' ? sessionStorage.getItem(ACTIVE_OPERATOR_KEY) : null;
+      typeof window !== 'undefined'
+        ? (localStorage.getItem(ACTIVE_OPERATOR_KEY) || sessionStorage.getItem(ACTIVE_OPERATOR_KEY))
+        : null;
 
     if (!storedId) {
       setActiveOperator(null);
@@ -251,6 +269,10 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
         setIsOperatorPromptOpen,
         registerName,
         setRegisterName,
+        isSupervisorMode,
+        setIsSupervisorMode,
+        supervisorRegisterHolder,
+        setSupervisorRegisterHolder,
         isSecurityUnlocked,
         unlockSecurity,
         lockSecurity,

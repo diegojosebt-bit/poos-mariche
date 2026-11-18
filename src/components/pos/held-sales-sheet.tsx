@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { safeJsonStringify, cleanObject } from "@/lib/json-guard";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,9 +36,11 @@ import { useDashboardStore } from "@/contexts/dashboard-context";
 
 type HeldSalesSheetProps = {
   heldSales: HeldSale[];
+  trigger?: ReactNode;
+  onSaleRestored?: () => void;
 };
 
-export function HeldSalesSheet({ heldSales }: HeldSalesSheetProps) {
+export function HeldSalesSheet({ heldSales, trigger, onSaleRestored }: HeldSalesSheetProps) {
     const { firestore, user } = useFirebase();
     const { removeCachedItem } = useDashboardStore();
     const router = useRouter();
@@ -45,6 +48,7 @@ export function HeldSalesSheet({ heldSales }: HeldSalesSheetProps) {
     const handleRestoreSale = (sale: HeldSale) => {
         // Al restaurar, removemos de la lista global de espera (0ms)
         removeCachedItem(sale.id);
+        onSaleRestored?.();
         
         const cleanItems = cleanObject(sale.items || []);
         const itemsParam = encodeURIComponent(safeJsonStringify(cleanItems));
@@ -64,22 +68,24 @@ export function HeldSalesSheet({ heldSales }: HeldSalesSheetProps) {
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button
-          variant="outline"
-          className="relative h-8 md:h-9 px-2.5 md:px-3.5 rounded-full border-slate-200/90 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-2xs transition-all flex items-center gap-1.5"
-          aria-label={`Ventas en espera (${heldSales.length})`}
-          title={`Ventas en espera (${heldSales.length})`}
-        >
-          <FolderClock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-          <span className="hidden lg:inline font-medium text-xs">En Espera</span>
-          {heldSales.length > 0 ? (
-            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-medium text-white">
-              {heldSales.length}
-            </span>
-          ) : (
-            <span className="hidden lg:inline text-[11px] font-normal text-slate-400">(0)</span>
-          )}
-        </Button>
+        {trigger ?? (
+          <Button
+            variant="outline"
+            className="relative h-8 md:h-9 px-2.5 md:px-3.5 rounded-full border-slate-200/90 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-2xs transition-all flex items-center gap-1.5"
+            aria-label={`Ventas en espera (${heldSales.length})`}
+            title={`Ventas en espera (${heldSales.length})`}
+          >
+            <FolderClock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+            <span className="hidden lg:inline font-medium text-xs">En Espera</span>
+            {heldSales.length > 0 ? (
+              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-medium text-white">
+                {heldSales.length}
+              </span>
+            ) : (
+              <span className="hidden lg:inline text-[11px] font-normal text-slate-400">(0)</span>
+            )}
+          </Button>
+        )}
       </SheetTrigger>
       <SheetContent className="bg-white border-slate-200 text-slate-900 shadow-xl">
         <SheetHeader>

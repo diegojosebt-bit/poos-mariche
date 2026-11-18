@@ -338,7 +338,7 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
     },
   });
 
-  const { profile } = useDashboardStore();
+  const { profile, activeOperator } = useDashboardStore();
   const uid = user?.uid ?? '';
   const usePaged = useFeatureFlag(profile, 'pagedData');
 
@@ -721,6 +721,8 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                 consumedParts: finalConsumedParts.map(({ isConsumed, ...p }) => p),
                 partsConsumed: false,
                 isPromo: effectiveIsPromo,
+                cashierId: activeOperator?.id || 'owner',
+                cashierName: activeOperator?.name || profile?.accountName || 'Administrador',
             });
 
             // Sin await: offline la escritura queda en la caché persistente y se
@@ -798,7 +800,11 @@ export function RepairFormDialog({ repairJob, children, isOpen, onOpenChange, on
                 createdAt: repairJob?.createdAt || new Date().toISOString(),
                 reservedParts: finalReservedParts.map(({isConsumed, ...p}) => p), 
                 consumedParts: finalConsumedParts.map(({isConsumed, ...p}) => p), 
-                partsConsumed: values.status === 'Completado', isPromo: effectiveIsPromo, ...completionData
+                partsConsumed: values.status === 'Completado',
+                isPromo: effectiveIsPromo,
+                cashierId: repairJob?.cashierId || activeOperator?.id || 'owner',
+                cashierName: repairJob?.cashierName || activeOperator?.name || profile?.accountName || 'Administrador',
+                ...completionData
             });
             transaction.set(jobRef, finalData, { merge: true });
             return finalData as RepairJob;

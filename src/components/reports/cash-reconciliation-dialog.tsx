@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useCurrency } from "@/hooks/use-currency";
 import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
-import { collection, doc, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocFromServer, writeBatch } from "firebase/firestore";
 import { format as formatDate, parseISO, isToday } from "date-fns";
 import { es } from "date-fns/locale";
 import { DoorClosed, Loader2, Printer, StickyNote, AlertTriangle, CheckCircle2 } from "lucide-react";
@@ -19,6 +19,7 @@ import { ReconciliationTicket, handlePrintReconciliation } from "./reconciliatio
 import { useDashboardStore } from "@/contexts/dashboard-context";
 import { queryCache } from "@/lib/firestore/query-cache";
 import { hasCashierSystemActive, OWNER_OPERATOR_ID } from "@/lib/cashiers";
+import { ensureOnline } from "@/lib/offline-guard";
 
 type CashReconciliationDialogProps = {
   openSales: Sale[];
@@ -172,13 +173,50 @@ export function CashReconciliationDialog({ openSales, targetCashierId, targetCas
   };
 
   const handleCloseDay = async () => {
-    if (!firestore || !user || transactionCount === 0) return;
+    if (!firestore || !user || transactionCount === 0 || isClosing) return;
+    if (!ensureOnline(toast, 'Cerrar caja')) return;
     setIsClosing(true);
+
+    // Blindaje Multi-Caja (1 sola lectura al cerrar): verifica que el turno no haya sido cerrado ya en otra caja/pestaña.
+    const sentinelSale = openSales.find((s) => Boolean(s.id));
+    if (sentinelSale?.id) {
+      try {
+        const sentinelSnap = await getDocFromServer(
+          doc(firestore, 'users', user.uid, 'sale_transactions', sentinelSale.id),
+        );
+        const existingReconId = sentinelSnap.exists() ? (sentinelSnap.data() as Sale).reconciliationId : undefined;
+        if (existingReconId) {
+          openSales.forEach((sale) => {
+            if (!sale.id) return;
+            updateCachedItem(sale.id, { reconciliationId: existingReconId });
+            queryCache.patchItem(user.uid, 'sale_transactions', sale.id, { reconciliationId: existingReconId });
+          });
+          toast({
+            variant: "destructive",
+            title: "Turno ya cerrado",
+            description: "Estas ventas ya fueron cerradas en otro equipo o pestaña. Se actualizó la vista.",
+          });
+          setIsClosing(false);
+          setIsOpen(false);
+          return;
+        }
+      } catch {
+        // Si falla la verificación puntual por red intermitente, abortar antes de duplicar cierres.
+        toast({
+          variant: "destructive",
+          title: "Sin confirmación del servidor",
+          description: "No se pudo verificar el estado de la caja. Revisa tu conexión e intenta nuevamente.",
+        });
+        setIsClosing(false);
+        return;
+      }
+    }
 
     const now = new Date();
     const nowIso = now.toISOString();
     const todayStr = formatDate(now, 'yyyy-MM-dd');
-    const reconciliationId = `RECON-${todayStr}-${now.getTime()}`;
+    const randSuffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+    const reconciliationId = `RECON-${todayStr}-${now.getTime().toString(36).toUpperCase()}-${randSuffix}`;
     const updatedInitialBalances = { ...countedAmounts };
     
     const batch = writeBatch(firestore);
@@ -214,16 +252,20 @@ export function CashReconciliationDialog({ openSales, targetCashierId, targetCas
     };
     batch.set(reconciliationRef, newReconciliation);
 
-    const settingsRef = doc(firestore, 'users', user.uid, 'app-settings', 'main');
-    batch.set(settingsRef, {
-      balancesUpdatedAt: nowIso,
-      initialBalances: updatedInitialBalances,
-    }, { merge: true });
+    // En modo multi-cajero cada cajero arquea su propia gaveta sin pisar `initialBalances` globales.
+    const shouldUpdateGlobalBalances = !cashierMode;
+    if (shouldUpdateGlobalBalances) {
+      const settingsRef = doc(firestore, 'users', user.uid, 'app-settings', 'main');
+      batch.set(settingsRef, {
+        balancesUpdatedAt: nowIso,
+        initialBalances: updatedInitialBalances,
+      }, { merge: true });
+    }
 
     const BATCH_LIMIT = 400;
     const batches = [batch];
     let currentBatch = batch;
-    let operationCount = 2; // reconciliationRef and settingsRef
+    let operationCount = shouldUpdateGlobalBalances ? 2 : 1;
 
     openSales.forEach(sale => {
       if (operationCount >= BATCH_LIMIT) {
@@ -250,8 +292,8 @@ export function CashReconciliationDialog({ openSales, targetCashierId, targetCas
       addItemToCache('daily_reconciliations', newReconciliation);
       queryCache.mergeIntoCatalog(user.uid, 'daily_reconciliations', [newReconciliation as any]);
 
-      // 3. Actualizamos las configuraciones y los saldos iniciales en el estado global de la app
-      if (settings) {
+      // 3. Actualizamos los saldos iniciales globales solo en modo caja única
+      if (shouldUpdateGlobalBalances && settings) {
           setSettings({
               ...settings,
               balancesUpdatedAt: nowIso,

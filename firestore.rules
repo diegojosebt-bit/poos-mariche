@@ -71,10 +71,11 @@ service cloud.firestore {
       );
       // El dueño no puede modificarse la licencia, su plan/cupos ni darse permisos de admin.
       // Si edita la lista de cajeros, Firestore valida que nunca exceda `maxCashiers`.
+      // Si actualiza `activeSessions`, Firestore valida que siga siendo un mapa acotado.
       allow update: if isAdmin() || (
         isOwner(userId) &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'licenseStatus', 'licenseExpiry', 'isAdmin', 'uid', 'createdAt',
+          'licenseStatus', 'licenseExpiry', 'isAdmin', 'uid', 'email', 'createdAt',
           'planTier', 'maxRegisters', 'maxCashiers'
         ]) &&
         (
@@ -86,6 +87,13 @@ service cloud.firestore {
                 ? resource.data.maxCashiers
                 : 2
             )
+          )
+        ) &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['activeSessions']) ||
+          (
+            request.resource.data.activeSessions is map &&
+            request.resource.data.activeSessions.size() <= 25
           )
         )
       );

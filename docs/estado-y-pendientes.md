@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Fecha** | 2026-11-03 |
-| **Resumen** | Fase 0 completa · motor de Fase 2 completo · POS/Inventario/Reparaciones en beta · búsqueda en servidor cableada · **Fase 1 parcial** (ventas online, gastos, fiados) |
-| **Verificación** | `tsc --noEmit` → 0 errores en todo el proyecto |
-| **Sin probar aún** | Nada se ejecutó contra Firestore desde esta sesión (el server no se levantó para no consumir lecturas) |
+| **Fecha** | 2026-11-18 |
+| **Resumen** | Fase 0 completa · motor de Fase 2 completo · POS/Inventario/Reparaciones en beta · búsqueda en servidor cableada · **Fase 1 parcial** · **Multi-Cajeros (1 Administrador + Cajeros) y Blindaje Multi-Caja completo** |
+| **Verificación** | `tsc --noEmit` → 0 errores · `npm run check:encoding` → OK |
+| **Sin probar aún** | QA en vivo contra Firestore con `?reads=1` y deploy de reglas/índices |
 
 ---
 
@@ -51,6 +51,27 @@
 - **`scripts/enable-flags.mjs`**: activa `pagedData` y `serverSearch` en todos los negocios de una vez.
 - **Análisis**: resumen del mes desde `stats_monthly` (ventas, utilidad, gastos, ticket, ventas por día y métodos de pago). **1 lectura por mes consultado**, sin cargar el catálogo.
 - **Dashboard**: gráfico mensual desde `stats_monthly` (**1 lectura por mes**); ya no pide 50 ventas + 100 reparaciones.
+
+### Multi-Cajeros (1 Administrador + Cajeros) y Blindaje Multi-Caja (2026-11-18)
+- **Modelo simplificado 1 Administrador + Cajeros**: todas las cajas inician con el correo del negocio y cada operador entra con su PIN (`SHA-256` con salt por negocio + bloqueo progresivo anti-fuerza bruta `30s / 120s / 300s`). Se eliminó la complejidad de múltiples presets de rol y se exige definir el **PIN de Administrador** antes de crear el primer cajero.
+- **Permisos granulares conectados de extremo a extremo**:
+  - Módulos visibles filtrados en sidebar, barra móvil y `SecurityGate`.
+  - `canGiveDiscounts`: oculta/bloquea descuentos, ofertas y obsequios en el carrito del POS.
+  - `canEditProducts` / `canDeleteRecords`: exigidos por `AdminAuthDialog`, incluyendo el borrado masivo de Inventario (`BulkDeleteButton`).
+  - `canViewCostsAndProfits`: oculta costos y ganancias reales en Inventario (tabla y tarjetas móviles) y en Reportes (`DateRangeReport`).
+  - `canViewAllCashiersReports`: aísla ventas, cierres y resumen por rango por cajero (sin mezclar `stats_daily` global).
+- **Sesiones simultáneas y Modo Supervisor híbrido**:
+  - `activeSessions` se actualiza con dot-notation (`activeSessions.${deviceId}`) + validación regex del `deviceId` y limpieza de sesiones vencidas (>24h), evitando sobreescrituras entre cajas y con 0 lecturas adicionales.
+  - Si el cupo (`maxRegisters`) está lleno y entra el Administrador, opera en **Modo Supervisor** (bloquea cobros en POS y abonos en Fiados sin cerrar la caja del cajero).
+  - En `firestore.rules`: el propietario no puede alterar `planTier`, `maxRegisters`, `maxCashiers`, `licenseStatus`, `licenseExpiry`, `isAdmin`, `uid`, `email` ni `createdAt`; `cashiers.size()` queda acotado a `maxCashiers` y `activeSessions` a un mapa de máximo 25 entradas (0 lecturas extra en reglas).
+- **Integridad de datos y facturación Multi-Caja**:
+  - **IDs sin colisión**: `S-YYMMDD-XXXXXXXX` (WebCrypto) en POS, `RFD-...` en reembolsos, `S-FIA-...` en abonos y `RECON-...` en cierres.
+  - **Checkout transaccional**: con `maxRegisters > 1` exige conexión y valida stock real + doble cobro de reparaciones en `runTransaction` (plan 1 caja conserva modo optimista + cola offline).
+  - **Edición de productos segura**: `ProductFormDialog` aplica deltas de stock en `runTransaction` preservando `salesCount` y stock vivo en servidor.
+  - **Reembolsos blindados**: verifica `liveSale.status !== 'refunded'` y `!isRefund` dentro de `runTransaction`, guarda `refundedByCashierId`/`Name` y etiqueta `cashierId`/`registerName` en el asiento negativo.
+  - **Cierres independientes y sin duplicados**: en modo cajeros no sobreescribe `app-settings/main.initialBalances` globales; antes de cerrar valida con 1 lectura centinela que el turno no haya sido cerrado en otro equipo.
+  - **Ventas en espera (`held_sales`)**: en Multi-Caja se reclaman y eliminan atómicamente vía `runTransaction` (con guard `claimedHeldSalesRef`).
+  - **Trazabilidad completa**: `cashierId`/`cashierName` registrados al crear ventas, abonos, fiados, reparaciones, gastos y cierres.
 
 ---
 

@@ -283,9 +283,12 @@ export function AuthView() {
 
       const user = userCredential.user;
 
-      // Instant Identity Generation
-      const newSessionId = crypto.randomUUID();
-      localStorage.setItem(SESSION_KEY, newSessionId);
+      // Limpiar operador previo al iniciar sesión en limpio (evita arrastrar sesiones viejas)
+      try {
+        localStorage.removeItem('mm_active_operator_id');
+        sessionStorage.removeItem('mm_active_operator_id');
+        sessionStorage.removeItem('mm_security_unlocked');
+      } catch {}
 
       // Limpiar bloqueo tras acceso exitoso; aplicar cooldown breve tras registro exitoso
       if (isLogin) {
@@ -296,7 +299,6 @@ export function AuthView() {
 
       const profileRef = doc(firestore, 'users', user.uid);
       const sessionUpdate = {
-        lastSessionId: newSessionId,
         updatedAt: new Date().toISOString(),
       };
 
@@ -310,7 +312,6 @@ export function AuthView() {
             accountName: accountName.trim().slice(0, 80),
             businessName: businessName.trim().slice(0, 100),
             businessPhone: businessPhone.trim().slice(0, 25),
-            lastSessionId: newSessionId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             licenseStatus: 'pending',

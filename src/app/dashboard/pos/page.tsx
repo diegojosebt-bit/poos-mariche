@@ -9,7 +9,7 @@ import { useSearchParams } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { useCollection, useFirebase, useMemoFirebase, deleteDocumentNonBlocking, setDocumentNonBlocking } from "@/firebase";
-import { collection, doc, query, limit, orderBy } from "firebase/firestore";
+import { collection, doc, query, limit, orderBy, runTransaction } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { Calculator, Plus, RefreshCw } from "lucide-react";
 import { HeldSalesSheet } from "@/components/pos/held-sales-sheet";
@@ -26,6 +26,7 @@ import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import { fetchDocsByIds } from '@/lib/firestore/fetch-by-ids';
 import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { useFeatureFlag } from '@/lib/features';
+import { getEffectivePlanLimits } from '@/lib/cashiers';
 import { cn } from '@/lib/utils';
 
 function POSContent() {
@@ -40,10 +41,11 @@ function POSContent() {
     const [addFlash, setAddFlash] = useState<{ key: number; name: string; qty: number } | null>(null);
     const addFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
-    const { addItemToCache, profile, desktopTopBarHost, mobileTopBarHost } = useDashboardStore();
+    const { addItemToCache, removeCachedItem, profile, desktopTopBarHost, mobileTopBarHost } = useDashboardStore();
     const uid = user?.uid ?? '';
     const usePaged = useFeatureFlag(profile, 'pagedData');
     const restoreFetchAttempts = useRef<Set<string>>(new Set());
+    const claimedHeldSalesRef = useRef<Set<string>>(new Set());
 
     // LEGACY (bandera apagada): catálogo completo, como hasta ahora.
     const productsCollection = useMemoFirebase(() => 
@@ -177,12 +179,41 @@ function POSContent() {
                     return { ...item, name: product.name };
                 }).filter((item): item is CartItem => item !== null);
 
-                setCart(restoredCart);
-                setMobilePane('cart');
-                if (restoredSaleId && firestore) {
-                    deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'held_sales', restoredSaleId));
+                const isMultiRegister = getEffectivePlanLimits(profile).isMultiRegister;
+
+                if (restoredSaleId && firestore && isMultiRegister) {
+                    if (claimedHeldSalesRef.current.has(restoredSaleId)) return;
+                    claimedHeldSalesRef.current.add(restoredSaleId);
+                    const heldRef = doc(firestore, 'users', user.uid, 'held_sales', restoredSaleId);
+                    router.replace('/dashboard/pos');
+                    void runTransaction(firestore, async (tx) => {
+                        const heldSnap = await tx.get(heldRef);
+                        if (!heldSnap.exists()) {
+                            throw new Error("Esta venta en espera ya fue retomada en otra caja.");
+                        }
+                        tx.delete(heldRef);
+                    })
+                        .then(() => {
+                            removeCachedItem(restoredSaleId);
+                            setCart(restoredCart);
+                            setMobilePane('cart');
+                        })
+                        .catch((err: any) => {
+                            toast({
+                                variant: "destructive",
+                                title: "Venta ya retomada",
+                                description: err?.message || "Otra caja ya abrió esta venta en espera.",
+                            });
+                        });
+                } else {
+                    setCart(restoredCart);
+                    setMobilePane('cart');
+                    if (restoredSaleId && firestore) {
+                        removeCachedItem(restoredSaleId);
+                        deleteDocumentNonBlocking(doc(firestore, 'users', user.uid, 'held_sales', restoredSaleId));
+                    }
+                    router.replace('/dashboard/pos');
                 }
-                router.replace('/dashboard/pos');
             } catch(e) {
                 toast({ variant: "destructive", title: "Error", description: "No se pudo restaurar la venta." });
             }
@@ -424,10 +455,10 @@ function POSContent() {
             )}
 
             {mobileTopBarHost && createPortal(
-                <div className="flex items-center gap-1">
-                    <HeldSalesSheet heldSales={heldSales || []} />
-                    <POSActionsSheet onAddCustomItem={handleAddCustomItem} />
-                </div>,
+                <POSActionsSheet
+                    heldSales={heldSales || []}
+                    onAddCustomItem={handleAddCustomItem}
+                />,
                 mobileTopBarHost
             )}
 

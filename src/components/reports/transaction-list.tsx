@@ -22,6 +22,7 @@ import { saleStatsWrites } from '@/lib/firestore/rollups';
 import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { ensureOnline } from '@/lib/offline-guard';
+import { OWNER_OPERATOR_ID } from '@/lib/cashiers';
 import { Badge } from "../ui/badge";
 import { Textarea } from "../ui/textarea";
 import { Label } from "../ui/label";
@@ -72,9 +73,26 @@ const methodIcons: Record<string, any> = {
 
 const ITEMS_PER_PAGE = 20;
 
+const REFUND_ID_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+function generateRefundSaleId(): string {
+    const timePart = Date.now().toString(36).toUpperCase();
+    let randPart = "";
+    if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
+        const bytes = new Uint8Array(4);
+        window.crypto.getRandomValues(bytes);
+        randPart = Array.from(bytes, (b) => REFUND_ID_ALPHABET[b % REFUND_ID_ALPHABET.length]).join("");
+    } else {
+        for (let i = 0; i < 4; i++) {
+            randPart += REFUND_ID_ALPHABET[Math.floor(Math.random() * REFUND_ID_ALPHABET.length)];
+        }
+    }
+    return `RFD-${timePart}-${randPart}`;
+}
+
 const RefundButton = ({ sale }: { sale: Sale }) => {
     const { firestore, user } = useFirebase();
-    const { updateCachedItem, addItemToCache } = useDashboardStore();
+    const { updateCachedItem, addItemToCache, activeOperator, profile, registerName } = useDashboardStore();
     const { toast } = useToast();
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [refundReason, setRefundReason] = useState("");
@@ -98,11 +116,26 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
         setIsProcessing(true);
         try {
             await runTransaction(firestore, async (transaction) => {
-                const repairJobSnap = sale.repairJobId ? await transaction.get(doc(firestore, 'users', user.uid, 'repair_jobs', sale.repairJobId)) : null;
+                // Blindaje Multi-Caja: leer la venta viva antes de reembolsar para evitar doble reembolso
+                const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', sale.id!);
+                const saleSnap = await transaction.get(saleRef);
+                if (!saleSnap.exists()) {
+                    throw new Error("La venta no existe en el servidor.");
+                }
+                const liveSale = saleSnap.data() as Sale;
+                if (liveSale.status === 'refunded') {
+                    throw new Error("Esta venta ya fue reembolsada en otra caja.");
+                }
+                if (liveSale.isRefund) {
+                    throw new Error("No se puede reembolsar un registro de devolución.");
+                }
+
+                const liveItems = Array.isArray(liveSale.items) ? liveSale.items : [];
+                const repairJobSnap = liveSale.repairJobId ? await transaction.get(doc(firestore, 'users', user.uid, 'repair_jobs', liveSale.repairJobId)) : null;
                 const repairJobData = repairJobSnap?.exists() ? repairJobSnap.data() as RepairJob : null;
 
                 const productIdsToRead = new Set<string>();
-                for (const item of sale.items) {
+                for (const item of liveItems) {
                     if (!item.isCustom && !item.isRepair) productIdsToRead.add(item.productId);
                 }
                 if (repairJobData?.reservedParts) {
@@ -122,7 +155,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                 const productIdsToReturn = new Map<string, { quantity: number, isFromRepair: boolean }>();
                 let totalCostToDeductUSD = 0;
 
-                for (const item of sale.items) {
+                for (const item of liveItems) {
                     if (item.isCustom) {
                         totalCostToDeductUSD += (item.customCostPrice || 0) * item.quantity;
                         continue;
@@ -152,7 +185,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     });
                 }
 
-                const realRevenueUSD = (sale.actualPaidAmount ?? sale.totalAmount);
+                const realRevenueUSD = (liveSale.actualPaidAmount ?? liveSale.totalAmount);
                 const realProfitUSD = realRevenueUSD - totalCostToDeductUSD;
 
                 if (repairJobSnap?.exists() && repairJobData) {
@@ -194,30 +227,34 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                     }
                 }
 
-                transaction.update(statsRef, {
+                transaction.set(statsRef, {
                     totalRealSales30d: Math.max(0, (currentStats.totalRealSales30d || 0) - realRevenueUSD),
                     totalRealProfit30d: (currentStats.totalRealProfit30d || 0) - realProfitUSD,
                     updatedAt: new Date().toISOString()
-                });
+                }, { merge: true });
 
-                const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', sale.id!);
+                const operatorId = activeOperator?.id || OWNER_OPERATOR_ID;
+                const operatorName = activeOperator?.name || profile?.accountName || 'Administrador';
+
                 transaction.update(saleRef, { 
                     status: 'refunded', 
                     refundedAt, 
                     refundReason,
-                    refundPaymentMethod: refundMethod 
+                    refundPaymentMethod: refundMethod,
+                    refundedByCashierId: operatorId,
+                    refundedByCashierName: operatorName,
                 });
 
                 // Si la venta ya estaba cerrada, la devolución es un egreso del
                 // cierre actual. Si seguía abierta, basta con excluir la venta.
-                if (sale.reconciliationId) {
-                    const refundAmount = Math.abs(Number(sale.actualPaidAmount ?? sale.totalAmount ?? 0));
-                    const refundRate = sale.bcvRateAtTime ?? 1;
+                if (liveSale.reconciliationId) {
+                    const refundAmount = Math.abs(Number(liveSale.actualPaidAmount ?? liveSale.totalAmount ?? 0));
+                    const refundRate = liveSale.bcvRateAtTime ?? 1;
                     const refundInMethod = refundMethod === 'Efectivo USD' || refundMethod === 'USDT / Crypto'
                         ? -refundAmount
                         : -refundAmount * refundRate;
-                    const refundSaleId = `RFD-${Date.now()}`;
-                    const refundSaleData = {
+                    const refundSaleId = generateRefundSaleId();
+                    const refundSaleData: Sale = {
                         id: refundSaleId,
                         items: [],
                         subtotal: -refundAmount,
@@ -235,6 +272,9 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
                         isRefund: true,
                         refundReason,
                         bcvRateAtTime: refundRate,
+                        cashierId: operatorId,
+                        cashierName: operatorName,
+                        registerName,
                     };
                     transaction.set(doc(firestore, 'users', user.uid, 'sale_transactions', refundSaleId), refundSaleData);
                     refundSaleForCache = refundSaleData;
@@ -242,7 +282,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
 
                 // Fase 1: revertir la venta en los agregados (0 lecturas).
                 try {
-                    const stats = saleStatsWrites(sale, -1);
+                    const stats = saleStatsWrites(liveSale, -1);
                     transaction.set(
                         doc(firestore, 'users', user.uid, 'stats_daily', stats.day),
                         stats.daily,
@@ -303,6 +343,7 @@ const RefundButton = ({ sale }: { sale: Sale }) => {
         }
     };
     
+    if (sale.isRefund) return null;
     if (sale.status === 'refunded') return <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[11px] font-medium text-rose-700">Reembolsado</span>;
     
     return (

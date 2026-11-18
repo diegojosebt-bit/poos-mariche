@@ -55,6 +55,8 @@ import { Input } from '@/components/ui/input';
 import { differenceInDays, parseISO } from 'date-fns';
 import { cn } from "@/lib/utils";
 import { SecurityGate } from "@/components/security-gate";
+import { AdminAuthDialog } from "@/components/admin-auth-dialog";
+import { canOperatorPerform, hasCashierSystemActive } from "@/lib/cashiers";
 import { normalizeText } from '@/lib/search-index';
 import { formatCategoryName } from '@/lib/inventory-utils';
 
@@ -129,30 +131,38 @@ function BulkDeleteButton({ table }: { table: TanstackTable<Product> }) {
         }
     };
 
+    const deleteTriggerButton = (
+        <Button
+            variant="outline"
+            size="sm"
+            disabled={selectedRows.length === 0}
+            className={cn(
+                "h-10 sm:h-9 gap-1.5 rounded-xl px-3 text-xs font-medium shadow-sm transition-all",
+                selectedRows.length > 0
+                    ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800"
+                    : "border-slate-200 bg-white text-slate-400"
+            )}
+            aria-label="Eliminar seleccionados"
+        >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Eliminar</span>
+            {selectedRows.length > 0 && (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">
+                    {selectedRows.length}
+                </span>
+            )}
+        </Button>
+    );
+
     return (
         <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
-            <AlertDialogTrigger asChild>
-                <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={selectedRows.length === 0}
-                    className={cn(
-                        "h-10 sm:h-9 gap-1.5 rounded-xl px-3 text-xs font-medium shadow-sm transition-all",
-                        selectedRows.length > 0
-                            ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800"
-                            : "border-slate-200 bg-white text-slate-400"
-                    )}
-                    aria-label="Eliminar seleccionados"
-                >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Eliminar</span>
-                    {selectedRows.length > 0 && (
-                        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">
-                            {selectedRows.length}
-                        </span>
-                    )}
-                </Button>
-            </AlertDialogTrigger>
+            {selectedRows.length > 0 ? (
+                <AdminAuthDialog actionType="deleteProducts" onAuthorized={() => setIsConfirmOpen(true)}>
+                    {deleteTriggerButton}
+                </AdminAuthDialog>
+            ) : (
+                deleteTriggerButton
+            )}
             <AlertDialogContent className="rounded-2xl border-slate-200 bg-white shadow-xl">
                 <AlertDialogHeader>
                     <AlertDialogTitle className="text-base font-semibold text-slate-900">¿Estás seguro?</AlertDialogTitle>
@@ -190,7 +200,7 @@ function InventoryContent() {
     const { firestore, user } = useFirebase();
     const { toast } = useToast();
     
-    const { profile } = useDashboardStore();
+    const { profile, activeOperator } = useDashboardStore();
     const { drafts, saveDraft, clearDraft, setFormOpen } = useDraftModals();
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -269,13 +279,15 @@ function InventoryContent() {
 
     const showAging = profile?.enabledModules?.includes('inventory_aging') ?? false;
     const showRepairs = profile?.enabledModules?.includes('repairs') ?? true;
+    const canViewCostsAndProfits = !hasCashierSystemActive(profile) || canOperatorPerform(activeOperator, 'canViewCostsAndProfits');
 
     const tableColumns = useMemo(() => {
         return columns.filter(column => {
             if (column.id === 'age') return showAging;
+            if ((column as any).accessorKey === 'costPrice') return canViewCostsAndProfits;
             return true;
         });
-    }, [showAging]);
+    }, [showAging, canViewCostsAndProfits]);
 
     const categories = useMemo(() => {
         if (!products) return ['all'];
@@ -573,6 +585,7 @@ function InventoryContent() {
                         allProducts: products || [], 
                         showAging, 
                         showRepairs, 
+                        canViewCostsAndProfits,
                         mutate: mutateProducts,
                         onEditProduct: (p: Product) => {
                             setEditingProduct(p);

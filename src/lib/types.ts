@@ -248,6 +248,8 @@ export type Sale = {
   refundedAt?: string;
   refundReason?: string;
   refundPaymentMethod?: PaymentMethod;
+  refundedByCashierId?: string;
+  refundedByCashierName?: string;
   reconciliationId?: string;
   totalChangeInUSD?: number;
   changeGiven?: Payment[];
@@ -376,6 +378,8 @@ export type ActiveRegisterSession = {
   deviceName?: string;
   cashierId?: string;
   cashierName?: string;
+  isOwner?: boolean;
+  mode?: 'register' | 'supervisor';
   lastSeenAt: string;
 };
 

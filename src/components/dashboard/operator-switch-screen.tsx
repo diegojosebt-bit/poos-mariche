@@ -16,10 +16,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useSidebar } from "@/components/ui/sidebar";
 import { useDashboardStore } from "@/contexts/dashboard-context";
 import { useToast } from "@/hooks/use-toast";
 import {
-  CASHIER_ROLE_PRESETS,
   OWNER_OPERATOR_ID,
   buildCashierOperator,
   buildOwnerOperator,
@@ -64,6 +64,7 @@ export function OperatorSwitchScreen() {
     registerName,
   } = useDashboardStore();
   const { toast } = useToast();
+  const { setOpenMobile } = useSidebar();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -86,10 +87,12 @@ export function OperatorSwitchScreen() {
       setShowPin(false);
       return;
     }
+    // En móvil, cerrar el drawer del menú lateral si estaba abierto para no bloquear toques
+    setOpenMobile(false);
     const state = readLockoutState(OPERATOR_PIN_LOCKOUT_KEY);
     setLockoutSeconds(state.remainingSeconds);
     setFailedAttempts(state.attempts);
-  }, [isVisible]);
+  }, [isVisible, setOpenMobile]);
 
   useEffect(() => {
     if (lockoutSeconds <= 0) return;
@@ -106,7 +109,7 @@ export function OperatorSwitchScreen() {
   if (!isVisible || !profile) return null;
 
   const isLockedOut = lockoutSeconds > 0;
-  const ownerName = profile.accountName?.trim() || "Dueño / Gerente";
+  const ownerName = profile.accountName?.trim() || "Administrador";
   const hasOwnerPin = Boolean(profile.securityPin && profile.securityPin.trim().length > 0);
   const selectedCashier: CashierProfile | undefined = activeCashiers.find((c) => c.id === selectedId);
   const isOwnerSelected = selectedId === OWNER_OPERATOR_ID;
@@ -132,7 +135,7 @@ export function OperatorSwitchScreen() {
 
     toast({
       title: `Turno activo: ${operator.name}`,
-      description: operator.isOwner ? "Acceso completo de gerente." : "Permisos de operador aplicados.",
+      description: operator.isOwner ? "Acceso completo de administrador." : "Permisos de cajero aplicados.",
     });
   };
 
@@ -210,8 +213,13 @@ export function OperatorSwitchScreen() {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-[440px] overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Seleccionar operador de caja"
+      className="pointer-events-auto fixed inset-0 z-[95] flex items-center justify-center overflow-y-auto overscroll-contain bg-slate-900/45 p-4 backdrop-blur-sm animate-in fade-in duration-150"
+    >
+      <div className="my-auto w-full max-w-[440px] overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Header puro blanco */}
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div className="flex items-center gap-3">
@@ -273,7 +281,7 @@ export function OperatorSwitchScreen() {
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500">
-                      Gerente · Acceso completo {!hasOwnerPin && "(sin PIN)"}
+                      Administrador · Acceso completo {!hasOwnerPin && "(sin PIN)"}
                     </p>
                   </div>
                 </div>
@@ -284,7 +292,6 @@ export function OperatorSwitchScreen() {
               <div className="max-h-[280px] space-y-2 overflow-y-auto pt-1">
                 {activeCashiers.map((cashier) => {
                   const isCurrent = activeOperator?.id === cashier.id;
-                  const roleInfo = CASHIER_ROLE_PRESETS[cashier.role] || CASHIER_ROLE_PRESETS.cashier;
                   return (
                     <button
                       key={cashier.id}
@@ -313,7 +320,7 @@ export function OperatorSwitchScreen() {
                             )}
                           </div>
                           <p className="text-[11px] text-slate-500">
-                            {roleInfo.label} · {cashier.permissions.modules.length} módulos
+                            Cajero · {cashier.permissions.modules.length} módulos
                           </p>
                         </div>
                       </div>
@@ -346,7 +353,7 @@ export function OperatorSwitchScreen() {
                       {isOwnerSelected ? ownerName : selectedCashier?.name}
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      {isOwnerSelected ? "Ingresa tu PIN de gerente" : "Ingresa tu PIN de operador"}
+                      {isOwnerSelected ? "Ingresa tu PIN de administrador" : "Ingresa tu PIN de cajero"}
                     </p>
                   </div>
                 </div>
@@ -425,7 +432,7 @@ export function OperatorSwitchScreen() {
                   type="button"
                   onClick={handleVerifyPin}
                   disabled={isLockedOut || isVerifying || !pin.trim()}
-                  className="h-11 w-full rounded-xl bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
+                  className="h-11 w-full rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-95"
                 >
                   {isLockedOut ? `Bloqueado (${lockoutSeconds}s)` : "Iniciar turno"}
                 </Button>

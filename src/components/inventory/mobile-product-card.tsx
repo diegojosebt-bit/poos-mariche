@@ -30,7 +30,9 @@ export function MobileProductCard({ product, table }: MobileProductCardProps) {
   const meta = (table?.options?.meta ?? {}) as {
     allProducts?: Product[];
     showAging?: boolean;
+    canViewCostsAndProfits?: boolean;
   };
+  const canViewCosts = meta.canViewCostsAndProfits ?? true;
 
   const available = getAvailableStock(product, meta.allProducts ?? []);
   const level = getStockLevel(available, product.lowStockThreshold || 1);
@@ -135,10 +137,12 @@ export function MobileProductCard({ product, table }: MobileProductCardProps) {
         <div className="overflow-hidden">
           <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-2.5">
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <dt className="text-slate-500">Costo</dt>
-                <dd className="font-medium tabular-nums text-slate-800">{getSymbol("USD")}{format(cost, "USD")}</dd>
-              </div>
+              {canViewCosts && (
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-slate-500">Costo</dt>
+                  <dd className="font-medium tabular-nums text-slate-800">{getSymbol("USD")}{format(cost, "USD")}</dd>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-slate-500">Físico</dt>
                 <dd className="font-medium tabular-nums text-slate-800">{physical}</dd>

@@ -82,6 +82,20 @@ demanda del usuario**), nunca al pintar la lista.
 | 2026-11 | Se retiró "Ver Historial" de reparaciones (listener de ventas que ya no se monta) | −0 (solo se abría a demanda) | 0 |
 | 2026-11 | Búsqueda directa por folio de reparación: `R-YYMMDD-XXXX` completo hace **un** `getDoc` (1 lectura) para traer órdenes fuera de la página | +1 por búsqueda de folio | 0 |
 | 2026-11 | Sincronización offline: verifica que los productos de la venta en cola existan antes de descontar stock (evita que un producto borrado atasque la cola) | +1 por documento implicado, sólo al sincronizar | 0 |
+| 2026-11-18 | **Multi-Cajeros (1 Administrador + Cajeros)** y permisos en UI (descuentos, costos/ganancias, borrado masivo con PIN, selector de operador) | **0** (sale de `users/{uid}` ya suscrito) | 0 (1 al crear/editar cajero) |
+| 2026-11-18 | **Sesiones simultáneas (`activeSessions.${deviceId}`)** con dot-notation, limpieza de sesiones >24h y Modo Supervisor híbrido | **0** (reusa listener único de perfil) | 1 al abrir/cambiar turno (idempotente) |
+| 2026-11-18 | **IDs anti-colisión** en ventas POS (`S-YYMMDD-XXXXXXXX`), reembolsos (`RFD-...`), abonos (`S-FIA-...`) y cierres (`RECON-...`) | **0** | 0 |
+| 2026-11-18 | **Reportes por cajero** (`DateRangeReport` aislado): al filtrar por un cajero omite `stats_daily` global y calcula desde las ventas en RAM | **−N** (ahorra lecturas de `stats_daily` al filtrar cajero) | 0 |
+| 2026-11-18 | **Blindaje Multi-Caja en acciones explícitas de escritura**: edición de producto por deltas, validación anti-doble reembolso, reclamo atómico de venta en espera (solo `maxRegisters > 1`) y chequeo centinela al cerrar caja | +1 sólo al guardar/confirmar acción explícita (0 al navegar/listar) | 0 extra |
+
+### Excepción deliberada 3: lecturas puntuales de integridad en escrituras Multi-Caja
+
+Para evitar pérdida de datos, stock revertido, dobles reembolsos y cierres duplicados cuando operan varias cajas simultáneas, se añadieron **4 lecturas puntuales de 1 documento** que **nunca** se ejecutan al navegar, listar ni renderizar UI —únicamente cuando el usuario confirma explícitamente una operación crítica:
+
+- **Editar producto existente (online)**: 1 lectura dentro de `runTransaction` al pulsar *Guardar* para aplicar deltas de `stockLevel`/`reservedStock`/`damagedStock` sobre el valor vivo del servidor sin revertir ventas simultáneas.
+- **Reembolsar venta**: 1 lectura (`saleRef`) dentro del `runTransaction` existente al confirmar el reembolso para verificar `status !== 'refunded'` y `!isRefund`.
+- **Retomar venta en espera en Multi-Caja (`maxRegisters > 1`)**: 1 lectura dentro de `runTransaction` al hacer clic en retomar para impedir que dos cajas cobren la misma venta aparcada.
+- **Cerrar turno/caja**: 1 lectura total (`getDocFromServer` sobre la primera venta abierta) al confirmar el cierre para impedir cierres duplicados desde dos equipos o pestañas.
 
 ### Excepción deliberada 2: verificación de existencia al sincronizar offline
 

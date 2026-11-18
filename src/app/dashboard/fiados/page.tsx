@@ -762,6 +762,7 @@ function SetDeadlineDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
 
 function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }: { children: React.ReactNode, onAdded: (f: Fiado) => void, isOpen: boolean, setIsOpen: (v: boolean) => void, existingFiados: Fiado[] }) {
     const { firestore, user } = useFirebase();
+    const { activeOperator, profile } = useDashboardStore();
     const { toast } = useToast();
     const { getFinalPrice } = useCurrency();
     const [loading, setLoading] = useState(false);
@@ -886,7 +887,9 @@ function AddFiadoDialog({ children, onAdded, isOpen, setIsOpen, existingFiados }
                     status: 'Pendiente',
                     createdAt: new Date().toISOString(),
                     items: selectedItems,
-                    isPromo: selectedItems.some(i => i.isPromo)
+                    isPromo: selectedItems.some(i => i.isPromo),
+                    cashierId: activeOperator?.id || 'owner',
+                    cashierName: activeOperator?.name || profile?.accountName || 'Administrador',
                 });
                 transaction.set(newDoc, finalData);
                 Object.assign(dataToSave, finalData);
@@ -1269,7 +1272,7 @@ function AddItemsToFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: 
 
 function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: Fiado) => void }) {
     const { firestore, user } = useFirebase();
-    const { addItemToCache, activeOperator, profile, registerName } = useDashboardStore();
+    const { addItemToCache, activeOperator, profile, registerName, isSupervisorMode, supervisorRegisterHolder } = useDashboardStore();
     const { toast } = useToast();
     const { format: formatCurrency, bcvRate, parallelRate, convert } = useCurrency();
     const [open, setOpen] = useState(false);
@@ -1335,6 +1338,15 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
 
     const handleAbono = async () => {
         if (!firestore || !user || payments.length === 0 || loading) return;
+
+        if (isSupervisorMode) {
+            toast({
+                variant: "destructive",
+                title: "Modo Supervisor activo",
+                description: `La caja está en uso por ${supervisorRegisterHolder || 'un cajero'}. Los cobros están pausados en este equipo.`,
+            });
+            return;
+        }
         
         const finalNetAbonoInUSD = totalAbonoInUSD - totalChangeGivenInUSD;
         
@@ -1361,7 +1373,8 @@ function CobrarFiadoDialog({ fiado, onUpdated }: { fiado: Fiado, onUpdated: (f: 
                     throw new Error("Esta cuenta ya fue saldada en otra caja.");
                 }
 
-                const saleId = `S-FIA-${Date.now()}`;
+                const randSuffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+                const saleId = `S-FIA-${Date.now().toString(36).toUpperCase()}-${randSuffix}`;
                 const saleRef = doc(firestore, 'users', user.uid, 'sale_transactions', saleId);
 
                 const newPaid = currentFiado.amountPaid + finalNetAbonoInUSD;
