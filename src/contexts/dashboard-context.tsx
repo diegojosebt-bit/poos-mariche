@@ -71,7 +71,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const [supervisorRegisterHolder, setSupervisorRegisterHolder] = useState<string | null>(null);
   const [registerName, setRegisterNameState] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(REGISTER_NAME_KEY) || 'Caja Principal';
+      return sessionStorage.getItem(REGISTER_NAME_KEY) || localStorage.getItem(REGISTER_NAME_KEY) || 'Caja Principal';
     }
     return 'Caja Principal';
   });
@@ -88,7 +88,10 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
     const clean = name.trim() || 'Caja Principal';
     setRegisterNameState(clean);
     if (typeof window !== 'undefined') {
-      localStorage.setItem(REGISTER_NAME_KEY, clean);
+      try {
+        sessionStorage.setItem(REGISTER_NAME_KEY, clean);
+        localStorage.setItem(REGISTER_NAME_KEY, clean);
+      } catch {}
     }
   }, []);
 
@@ -97,8 +100,8 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
     setIsOperatorPromptOpen(false);
     if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem(ACTIVE_OPERATOR_KEY, operator.id);
         sessionStorage.setItem(ACTIVE_OPERATOR_KEY, operator.id);
+        localStorage.setItem(ACTIVE_OPERATOR_KEY, operator.id);
       } catch {}
       if (operator.isOwner) {
         sessionStorage.setItem('mm_security_unlocked', 'true');
@@ -115,8 +118,8 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
     setSupervisorRegisterHolder(null);
     if (typeof window !== 'undefined') {
       try {
-        localStorage.removeItem(ACTIVE_OPERATOR_KEY);
         sessionStorage.removeItem(ACTIVE_OPERATOR_KEY);
+        localStorage.removeItem(ACTIVE_OPERATOR_KEY);
         sessionStorage.removeItem('mm_security_unlocked');
       } catch {}
     }
@@ -138,7 +141,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
 
     const storedId =
       typeof window !== 'undefined'
-        ? (localStorage.getItem(ACTIVE_OPERATOR_KEY) || sessionStorage.getItem(ACTIVE_OPERATOR_KEY))
+        ? (sessionStorage.getItem(ACTIVE_OPERATOR_KEY) || localStorage.getItem(ACTIVE_OPERATOR_KEY))
         : null;
 
     if (!storedId) {

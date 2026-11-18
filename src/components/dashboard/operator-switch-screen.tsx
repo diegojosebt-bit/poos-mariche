@@ -25,8 +25,10 @@ import {
   buildOwnerOperator,
   canOperatorAccessModule,
   getActiveCashiers,
+  getEffectivePlanLimits,
   hasCashierSystemActive,
 } from "@/lib/cashiers";
+import { getFreshSessions, getOrCreateDeviceId } from "@/lib/device-session";
 import {
   clearLockoutState,
   readLockoutState,
@@ -72,6 +74,34 @@ export function OperatorSwitchScreen() {
   const activeCashiers = useMemo(() => getActiveCashiers(profile), [profile]);
   const isMandatory = cashierSystemEnabled && !activeOperator;
   const isVisible = isMandatory || (cashierSystemEnabled && isOperatorPromptOpen);
+
+  const currentDeviceId = getOrCreateDeviceId();
+  const limits = useMemo(() => getEffectivePlanLimits(profile), [profile]);
+  const freshSessions = useMemo(
+    () => getFreshSessions(profile?.activeSessions),
+    [profile?.activeSessions],
+  );
+
+  const activeCashierMap = useMemo(() => {
+    const map = new Map<string, { deviceId: string; deviceName: string }>();
+    for (const s of Object.values(freshSessions)) {
+      if (s.cashierId && s.mode !== 'supervisor') {
+        map.set(s.cashierId, {
+          deviceId: s.deviceId,
+          deviceName: s.deviceName || 'Otra caja',
+        });
+      }
+    }
+    return map;
+  }, [freshSessions]);
+
+  const otherActiveRegisters = useMemo(() => {
+    return Object.values(freshSessions).filter(
+      (s) => s.deviceId !== currentDeviceId && s.mode !== 'supervisor',
+    );
+  }, [freshSessions, currentDeviceId]);
+
+  const isRegisterLimitReached = otherActiveRegisters.length >= limits.maxRegisters;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pin, setPin] = useState("");
@@ -140,6 +170,17 @@ export function OperatorSwitchScreen() {
   };
 
   const handleSelectProfile = (id: string) => {
+    // Si no es el dueño y se alcanzó el límite de cajas simultáneas
+    // y este cajero no tiene ya un turno abierto en otra caja que vaya a transferir:
+    if (id !== OWNER_OPERATOR_ID && isRegisterLimitReached && !activeCashierMap.has(id)) {
+      toast({
+        variant: "destructive",
+        title: "Límite de cajas alcanzado",
+        description: `Ya hay ${otherActiveRegisters.length} de ${limits.maxRegisters} cajas cobrando simultáneamente. El administrador debe entrar para liberar un equipo o ampliar el plan.`,
+      });
+      return;
+    }
+
     setSelectedId(id);
     setPin("");
     setShowPin(false);
@@ -254,6 +295,20 @@ export function OperatorSwitchScreen() {
         <div className="p-5">
           {!selectedId ? (
             <div className="space-y-2.5">
+              {isRegisterLimitReached && (
+                <div className="mb-2 flex items-start gap-2.5 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3 text-amber-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                  <div className="min-w-0 text-xs">
+                    <p className="font-semibold text-amber-900">
+                      Límite de cajas cobrando ({otherActiveRegisters.length}/{limits.maxRegisters})
+                    </p>
+                    <p className="text-[11px] text-amber-700/90 leading-relaxed">
+                      Todos los cupos de cobro están en uso. Entra como Administrador para supervisar o liberar una caja inactiva.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Tarjeta del Dueño / Gerente */}
               <button
                 type="button"
@@ -279,6 +334,11 @@ export function OperatorSwitchScreen() {
                           Actual
                         </span>
                       )}
+                      {isRegisterLimitReached && !activeOperator?.isOwner && (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                          Modo Supervisor
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] text-slate-500">
                       Administrador · Acceso completo {!hasOwnerPin && "(sin PIN)"}
@@ -292,6 +352,8 @@ export function OperatorSwitchScreen() {
               <div className="max-h-[280px] space-y-2 overflow-y-auto pt-1">
                 {activeCashiers.map((cashier) => {
                   const isCurrent = activeOperator?.id === cashier.id;
+                  const activeOnOther = activeCashierMap.get(cashier.id);
+                  const isBlockedByLimit = isRegisterLimitReached && !activeOnOther;
                   return (
                     <button
                       key={cashier.id}
@@ -301,7 +363,9 @@ export function OperatorSwitchScreen() {
                         "flex w-full items-center justify-between gap-3 rounded-xl border p-3.5 text-left transition-all",
                         isCurrent
                           ? "border-emerald-300 bg-emerald-50/50 ring-1 ring-emerald-200/70"
-                          : "border-slate-200/80 bg-white hover:border-blue-200 hover:bg-slate-50/70"
+                          : isBlockedByLimit
+                            ? "border-slate-200/60 bg-slate-50/40 opacity-70 hover:bg-slate-100/60"
+                            : "border-slate-200/80 bg-white hover:border-blue-200 hover:bg-slate-50/70"
                       )}
                     >
                       <div className="flex min-w-0 items-center gap-3">
@@ -309,13 +373,23 @@ export function OperatorSwitchScreen() {
                           {cashier.name.slice(0, 2).toUpperCase()}
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <span className="truncate text-sm font-semibold text-slate-900">
                               {cashier.name}
                             </span>
                             {isCurrent && (
                               <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
                                 Actual
+                              </span>
+                            )}
+                            {activeOnOther && !isCurrent && (
+                              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                                En turno: {activeOnOther.deviceName}
+                              </span>
+                            )}
+                            {isBlockedByLimit && (
+                              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                                Sin cupo
                               </span>
                             )}
                           </div>
@@ -332,6 +406,14 @@ export function OperatorSwitchScreen() {
             </div>
           ) : (
             <div className="space-y-4">
+              {selectedCashier && activeCashierMap.has(selectedCashier.id) && (
+                <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                  <p className="text-[11px] leading-tight">
+                    Este cajero está activo en <strong>{activeCashierMap.get(selectedCashier.id)?.deviceName}</strong>. Al entrar aquí, la otra caja se cerrará de inmediato.
+                  </p>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3.5 py-2.5">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <div

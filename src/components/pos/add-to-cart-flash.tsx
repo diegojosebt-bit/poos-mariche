@@ -5,7 +5,7 @@ import { Check } from "lucide-react";
 /**
  * Confirmación de "añadido al carrito".
  *
- * Píldora flotante que entra con un rebote corto y desaparece sola en 1,5 s.
+ * Píldora flotante que entra con un rebote corto y desaparece sola en 1 s.
  * Sin modal, sin bloquear el toque y sin mover el layout.
  */
 export function AddToCartFlash({

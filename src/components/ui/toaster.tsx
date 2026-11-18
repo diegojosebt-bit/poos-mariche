@@ -30,7 +30,7 @@ export function Toaster() {
         const { Icon, badge } = VARIANT_STYLE[key]
 
         return (
-          <Toast key={id} variant={variant} {...props}>
+          <Toast key={id} variant={variant} {...props} duration={1000}>
             <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", badge)}>
               <Icon className="h-4 w-4" strokeWidth={2.5} />
             </span>

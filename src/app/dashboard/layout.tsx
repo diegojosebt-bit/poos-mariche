@@ -21,70 +21,18 @@ import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { DashboardProvider, useDashboardStore } from '@/contexts/dashboard-context';
 import { DraftModalsProvider, DraftRestorePill } from '@/contexts/draft-modals-context';
 import { getEffectivePlanLimits, hasCashierSystemActive } from '@/lib/cashiers';
+import {
+    getOrCreateDeviceId,
+    buildDeviceSession,
+    getFreshSessions,
+    findDuplicateCashierSession,
+    DEVICE_ID_KEY,
+    SESSION_KEY,
+} from '@/lib/device-session';
+import { useToast } from '@/hooks/use-toast';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { ExchangeRateReminder } from '@/components/dashboard/exchange-rate-reminder';
-
-const SESSION_KEY = 'mm_session_id';
-const DEVICE_ID_KEY = 'mm_device_id';
-
-const VALID_DEVICE_ID_RE = /^[a-zA-Z0-9_-]{6,64}$/;
-
-function getOrCreateDeviceId(): string {
-    if (typeof window === 'undefined') return 'server';
-    let id = localStorage.getItem(DEVICE_ID_KEY);
-    if (!id || !VALID_DEVICE_ID_RE.test(id)) {
-        id = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        localStorage.setItem(DEVICE_ID_KEY, id);
-    }
-    return id;
-}
-
-function buildDeviceSession(
-    deviceId: string,
-    deviceName: string,
-    operator: ActiveOperator | null,
-    mode: 'register' | 'supervisor' = 'register',
-): ActiveRegisterSession {
-    const session: ActiveRegisterSession = {
-        deviceId,
-        deviceName: deviceName || 'Caja Principal',
-        mode,
-        lastSeenAt: new Date().toISOString(),
-    };
-    if (operator?.id) session.cashierId = operator.id;
-    if (operator?.name) session.cashierName = operator.name;
-    if (operator) session.isOwner = operator.isOwner;
-    return session;
-}
-
-function getFreshSessions(
-    raw: Record<string, ActiveRegisterSession> | undefined,
-): Record<string, ActiveRegisterSession> {
-    if (!raw) return {};
-    const now = new Date();
-    const fresh: Record<string, ActiveRegisterSession> = {};
-    for (const [key, session] of Object.entries(raw)) {
-        if (!session?.lastSeenAt) continue;
-        try {
-            if (differenceInHours(now, parseISO(session.lastSeenAt)) < 24) {
-                const cleaned: ActiveRegisterSession = {
-                    deviceId: session.deviceId || key,
-                    lastSeenAt: session.lastSeenAt,
-                };
-                if (session.deviceName) cleaned.deviceName = session.deviceName;
-                if (session.cashierId) cleaned.cashierId = session.cashierId;
-                if (session.cashierName) cleaned.cashierName = session.cashierName;
-                if (typeof session.isOwner === 'boolean') cleaned.isOwner = session.isOwner;
-                if (session.mode === 'register' || session.mode === 'supervisor') cleaned.mode = session.mode;
-                fresh[key] = cleaned;
-            }
-        } catch {
-            // ignorar fecha inválida
-        }
-    }
-    return fresh;
-}
 
 function LicenseExpiredScreen({ profile }: { profile: UserProfile | null }) {
     const { auth, firestore } = useFirebase();
@@ -295,6 +243,7 @@ function RegisterLimitScreen({
  */
 function DashboardInitializer({ children }: { children: ReactNode }) {
     const { firestore, user, auth } = useFirebase();
+    const { toast } = useToast();
     const {
         setSettings,
         setProfile,
@@ -333,29 +282,85 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
         return () => unsubscribe();
     }, [firestore, user, setProfile]);
 
-    // 1B. GESTIÓN DE SESIONES POR DISPOSITIVO (Camino 2 Híbrido: Modo Caja + Modo Supervisor del Dueño)
+    // 1B. GESTIÓN DE SESIONES POR DISPOSITIVO (Multi-Caja estricto + Anti-Colisión de Cajeros)
     useEffect(() => {
         if (!firestore || !user || !profile) return;
 
+        const pRef = doc(firestore, 'users', user.uid);
+        const deviceId = getOrCreateDeviceId();
         const cashierMode = hasCashierSystemActive(profile);
-        // Esperar primero a que el usuario seleccione Dueño o Cajero (nunca cerrar ni bloquear antes)
+        const limits = getEffectivePlanLimits(profile);
+        const rawSessions = profile.activeSessions || {};
+        const fresh = getFreshSessions(rawSessions);
+        const staleSessionKeys = Object.keys(rawSessions).filter((k) => !fresh[k]);
+
+        // Si no hay operador activo en este equipo (pantalla de PIN):
+        // Asegurar que si este dispositivo tenía una sesión abierta en Firestore, se libere de inmediato.
         if (cashierMode && !activeOperator) {
             lastSyncedSlotSigRef.current = null;
             setRegisterLimitBlocked(null);
             setIsSupervisorMode(false);
             setSupervisorRegisterHolder(null);
+
+            if (rawSessions[deviceId]) {
+                void updateDoc(pRef, {
+                    [`activeSessions.${deviceId}`]: deleteField(),
+                }).catch(() => {});
+            }
             return;
         }
 
         const effectiveOperator = activeOperator;
         if (!effectiveOperator) return;
 
-        const pRef = doc(firestore, 'users', user.uid);
-        const deviceId = getOrCreateDeviceId();
-        const limits = getEffectivePlanLimits(profile);
-        const rawSessions = profile.activeSessions || {};
-        const fresh = getFreshSessions(rawSessions);
-        const staleSessionKeys = Object.keys(rawSessions).filter((k) => !fresh[k]);
+        // 1. CHEQUEO ANTI-DUPLICACIÓN DE CAJERO:
+        // Un cajero es una persona física y no puede operar dos cajas al mismo tiempo.
+        if (!effectiveOperator.isOwner) {
+            const duplicateSession = findDuplicateCashierSession(fresh, deviceId, effectiveOperator.id);
+            if (duplicateSession) {
+                const myLastSeen = fresh[deviceId]?.lastSeenAt;
+                const otherLastSeen = duplicateSession.lastSeenAt;
+                // Si la otra sesión existe y es más reciente o nosotros aún no estábamos sincronizados, nos expulsamos
+                const isOtherNewer = !myLastSeen || (otherLastSeen && parseISO(otherLastSeen) >= parseISO(myLastSeen));
+
+                if (isOtherNewer) {
+                    console.warn(`[Multi-Caja] Expulsando cajero ${effectiveOperator.name}: turno activo en ${duplicateSession.deviceName || duplicateSession.deviceId}`);
+                    lastSyncedSlotSigRef.current = null;
+                    clearActiveOperator();
+                    setRegisterLimitBlocked(null);
+                    setIsSupervisorMode(false);
+                    if (rawSessions[deviceId]) {
+                        void updateDoc(pRef, {
+                            [`activeSessions.${deviceId}`]: deleteField(),
+                        }).catch(() => {});
+                    }
+                    toast({
+                        variant: "destructive",
+                        title: "Sesión cerrada",
+                        description: `Tu usuario inició turno en otra caja (${duplicateSession.deviceName || "otro equipo"}).`,
+                    });
+                    return;
+                }
+            }
+        }
+
+        // 2. CHEQUEO DE EXPULSIÓN / CUPO RECLAMADO:
+        // Si este cajero ya estaba sincronizado pero su sesión fue borrada de Firestore
+        // (por ejemplo, porque el administrador liberó el cupo o se transfirió):
+        if (!effectiveOperator.isOwner && lastSyncedSlotSigRef.current && !fresh[deviceId]) {
+            console.warn(`[Multi-Caja] Sesión eliminada en servidor para ${deviceId}. Cerrando turno.`);
+            lastSyncedSlotSigRef.current = null;
+            clearActiveOperator();
+            setRegisterLimitBlocked(null);
+            setIsSupervisorMode(false);
+            toast({
+                variant: "destructive",
+                title: "Turno cerrado",
+                description: "El cupo de esta caja fue liberado o transferido a otro equipo.",
+            });
+            return;
+        }
+
         const otherRegisters = Object.values(fresh).filter(
             (s) => s.deviceId !== deviceId && s.mode !== 'supervisor',
         );
@@ -387,6 +392,17 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
                 [`activeSessions.${deviceId}`]: buildDeviceSession(deviceId, registerName, effectiveOperator, mode),
                 ...(extraPatch || {}),
             };
+
+            // Si somos un cajero y ya existía otra sesión con nuestro mismo cashierId, la borramos en el mismo write
+            if (!effectiveOperator.isOwner) {
+                const oldMySession = Object.values(fresh).find(
+                    (s) => s.deviceId !== deviceId && s.cashierId === effectiveOperator.id,
+                );
+                if (oldMySession) {
+                    patch[`activeSessions.${oldMySession.deviceId}`] = deleteField();
+                }
+            }
+
             for (const staleKey of staleSessionKeys) {
                 if (staleKey !== deviceId) {
                     patch[`activeSessions.${staleKey}`] = deleteField();
@@ -434,7 +450,29 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
             return;
         }
 
-        // Caso D: Todos los cupos de caja están ocupados por otros cajeros (o sin sistema de cajeros)
+        // Caso D: Cupos llenos y quien intenta entrar es un Cajero:
+        // Los cajeros NO pueden expulsar a otras cajas ni forzar cupos.
+        // Se expulsa de inmediato para volver a la pantalla de PIN.
+        if (!effectiveOperator.isOwner) {
+            console.warn(`[Multi-Caja] Cupo lleno (${otherRegisters.length}/${limits.maxRegisters}). Expulsando cajero ${effectiveOperator.name}.`);
+            lastSyncedSlotSigRef.current = null;
+            clearActiveOperator();
+            setRegisterLimitBlocked(null);
+            setIsSupervisorMode(false);
+            if (rawSessions[deviceId]) {
+                void updateDoc(pRef, {
+                    [`activeSessions.${deviceId}`]: deleteField(),
+                }).catch(() => {});
+            }
+            toast({
+                variant: "destructive",
+                title: "Límite de cajas alcanzado",
+                description: `Ya hay ${limits.maxRegisters} caja(s) cobrando. El administrador debe liberar un cupo o ampliar el plan.`,
+            });
+            return;
+        }
+
+        // Caso E: Es el dueño sin sistema de cajeros o superó el límite absoluto
         lastSyncedSlotSigRef.current = null;
         setIsSupervisorMode(false);
         setSupervisorRegisterHolder(null);
@@ -448,9 +486,29 @@ function DashboardInitializer({ children }: { children: ReactNode }) {
         profile,
         activeOperator,
         registerName,
+        clearActiveOperator,
         setIsSupervisorMode,
         setSupervisorRegisterHolder,
+        toast,
     ]);
+
+    // Limpieza de sesión al cerrar pestaña o ventana
+    useEffect(() => {
+        if (!firestore || !user) return;
+        const deviceId = getOrCreateDeviceId();
+        const pRef = doc(firestore, 'users', user.uid);
+
+        const handleUnload = () => {
+            try {
+                void updateDoc(pRef, {
+                    [`activeSessions.${deviceId}`]: deleteField(),
+                }).catch(() => {});
+            } catch {}
+        };
+
+        window.addEventListener('pagehide', handleUnload);
+        return () => window.removeEventListener('pagehide', handleUnload);
+    }, [firestore, user]);
 
     const handleTakeRegisterSlot = (replaceDeviceId: string) => {
         if (!firestore || !user || !profile) return;

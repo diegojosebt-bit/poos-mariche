@@ -309,7 +309,7 @@ function POSContent() {
         // Confirmación visible: sin esto, tocar un producto no daba ninguna señal.
         setAddFlash({ key: Date.now(), name: product.name, qty: nextQuantity });
         if (addFlashTimer.current) clearTimeout(addFlashTimer.current);
-        addFlashTimer.current = setTimeout(() => setAddFlash(null), 1500);
+        addFlashTimer.current = setTimeout(() => setAddFlash(null), 1000);
         try { navigator.vibrate?.(15); } catch { /* sin vibración disponible */ }
     };
 

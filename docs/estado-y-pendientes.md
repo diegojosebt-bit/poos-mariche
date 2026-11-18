@@ -61,9 +61,14 @@
   - `canViewCostsAndProfits`: oculta costos y ganancias reales en Inventario (tabla y tarjetas móviles) y en Reportes (`DateRangeReport`).
   - `canViewAllCashiersReports`: aísla ventas, cierres y resumen por rango por cajero (sin mezclar `stats_daily` global).
 - **Sesiones simultáneas y Modo Supervisor híbrido**:
-  - `activeSessions` se actualiza con dot-notation (`activeSessions.${deviceId}`) + validación regex del `deviceId` y limpieza de sesiones vencidas (>24h), evitando sobreescrituras entre cajas y con 0 lecturas adicionales.
+  - `activeSessions` se actualiza con dot-notation (`activeSessions.${deviceId}`) + validación regex del `deviceId` y limpieza de sesiones vencidas (>14h), evitando sobreescrituras entre cajas y con 0 lecturas adicionales.
+  - **Aislamiento Multi-Pestaña y Dispositivo**: `getOrCreateDeviceId()` prioriza `sessionStorage` para que pestañas/ventanas distintas en el mismo navegador actúen como cajas independientes al hacer pruebas o cobros paralelos, persistiendo a través de F5 pero sin colisionar entre sí.
+  - **Anti-Duplicación de Cajero (Anti-Colisión)**: un cajero no puede operar dos cajas a la vez. Si un cajero inicia turno en una caja nueva, la caja anterior detecta la sesión en tiempo real a través del snapshot de `users/{uid}`, cierra el turno automáticamente, expulsa al operador a la pantalla de PIN y muestra una alerta destructiva ("Sesión cerrada: Tu usuario inició turno en otra caja").
+  - **Expulsión Inmediata por Límite de Cajas**: los cajeros no pueden forzar cupos ni expulsar a otras cajas en cobro. Si todos los cupos (`maxRegisters`) están ocupados por otros cajeros, el intento de entrada es rechazado de inmediato y devuelto a la pantalla de PIN, mostrando qué cajas están cobrando.
+  - **Panel de Cajas Conectadas para el Administrador**: sección en vivo en Configuración -> Cajeros y Cajas donde el dueño ve en tiempo real cada caja conectada, operador activo y hora de última actividad, con botón *Liberar* para cerrar sesiones remotas o abandonadas con 1 clic.
   - Si el cupo (`maxRegisters`) está lleno y entra el Administrador, opera en **Modo Supervisor** (bloquea cobros en POS y abonos en Fiados sin cerrar la caja del cajero).
   - En `firestore.rules`: el propietario no puede alterar `planTier`, `maxRegisters`, `maxCashiers`, `licenseStatus`, `licenseExpiry`, `isAdmin`, `uid`, `email` ni `createdAt`; `cashiers.size()` queda acotado a `maxCashiers` y `activeSessions` a un mapa de máximo 25 entradas (0 lecturas extra en reglas).
+- **Notificaciones del Sistema**: duración uniforme de 1 segundo para todas las alertas flotantes (guardado, editado, impreso, flash de carrito), permitiendo un flujo de cobro ultrarrápido sin retrasos visuales.
 - **Integridad de datos y facturación Multi-Caja**:
   - **IDs sin colisión**: `S-YYMMDD-XXXXXXXX` (WebCrypto) en POS, `RFD-...` en reembolsos, `S-FIA-...` en abonos y `RECON-...` en cierres.
   - **Checkout transaccional**: con `maxRegisters > 1` exige conexión y valida stock real + doble cobro de reparaciones en `runTransaction` (plan 1 caja conserva modo optimista + cola offline).

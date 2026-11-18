@@ -3,6 +3,7 @@
 import { useCurrency } from "@/hooks/use-currency";
 import { Loader2, RefreshCw, RotateCcw, Wifi, WifiOff, Download, LogOut, User, ChevronDown, Users, Lock, Landmark, TrendingUp } from "lucide-react";
 import { hasCashierSystemActive } from "@/lib/cashiers";
+import { getOrCreateDeviceId, SESSION_KEY } from "@/lib/device-session";
 import { usePwaInstall } from "@/contexts/pwa-install-context";
 import { Button } from "../ui/button";
 import { useState, useEffect, useRef } from "react";
@@ -198,8 +199,8 @@ export function ExchangeRateReminder() {
 
     const handleSignOut = async () => {
         try {
-            const deviceId = typeof window !== 'undefined' ? localStorage.getItem('mm_device_id') : null;
-            if (firestore && user && deviceId) {
+            const deviceId = getOrCreateDeviceId();
+            if (firestore && user && deviceId && deviceId !== 'server') {
                 try {
                     await updateDoc(doc(firestore, 'users', user.uid), {
                         [`activeSessions.${deviceId}`]: deleteField(),
@@ -208,10 +209,11 @@ export function ExchangeRateReminder() {
                     // Sin conexión o sin permisos: igual cerramos sesión local.
                 }
             }
-            localStorage.removeItem('mm_session_id');
+            localStorage.removeItem(SESSION_KEY);
             localStorage.removeItem('mm_active_operator_id');
             sessionStorage.removeItem('mm_active_operator_id');
             sessionStorage.removeItem('mm_security_unlocked');
+            sessionStorage.removeItem('mm_device_id');
             if (auth) await signOut(auth);
         } finally {
             router.replace('/');

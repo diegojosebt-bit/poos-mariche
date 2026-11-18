@@ -9,7 +9,8 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+const TOAST_AUTO_DISMISS_MS = 1000
+const TOAST_REMOVE_DELAY = 300
 
 type ToasterToast = ToastProps & {
   id: string
@@ -57,6 +58,20 @@ interface State {
 }
 
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+const toastAutoDismissTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+
+const clearAutoDismissTimeout = (toastId?: string) => {
+  if (toastId) {
+    const t = toastAutoDismissTimeouts.get(toastId)
+    if (t) {
+      clearTimeout(t)
+      toastAutoDismissTimeouts.delete(toastId)
+    }
+    return
+  }
+  toastAutoDismissTimeouts.forEach((t) => clearTimeout(t))
+  toastAutoDismissTimeouts.clear()
+}
 
 const addToRemoveQueue = (toastId: string) => {
   if (toastTimeouts.has(toastId)) {
@@ -92,6 +107,8 @@ export const reducer = (state: State, action: Action): State => {
 
     case "DISMISS_TOAST": {
       const { toastId } = action
+
+      clearAutoDismissTimeout(toastId)
 
       // ! Side effects ! - This could be extracted into a dismissToast() action,
       // but I'll keep it here for simplicity
@@ -148,21 +165,32 @@ function toast({ ...props }: Toast) {
   const update = (props: ToasterToast) =>
     dispatch({
       type: "UPDATE_TOAST",
-      toast: { ...props, id },
+      toast: { ...props, id, duration: TOAST_AUTO_DISMISS_MS },
     })
-  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
+  const dismiss = () => {
+    clearAutoDismissTimeout(id)
+    dispatch({ type: "DISMISS_TOAST", toastId: id })
+  }
 
   dispatch({
     type: "ADD_TOAST",
     toast: {
       ...props,
       id,
+      duration: TOAST_AUTO_DISMISS_MS,
       open: true,
       onOpenChange: (open) => {
         if (!open) dismiss()
       },
     },
   })
+
+  // Cierre garantizado a 1 segundo aunque Radix pause su timer (al imprimir, perder foco o tocar en móvil).
+  const autoTimer = setTimeout(() => {
+    toastAutoDismissTimeouts.delete(id)
+    dismiss()
+  }, TOAST_AUTO_DISMISS_MS)
+  toastAutoDismissTimeouts.set(id, autoTimer)
 
   return {
     id: id,
@@ -182,7 +210,7 @@ function useToast() {
         listeners.splice(index, 1)
       }
     }
-  }, [state])
+  }, [])
 
   return {
     ...state,

@@ -2,7 +2,10 @@
 
 import { useState, useMemo } from "react";
 import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
-import { doc } from "firebase/firestore";
+import { doc, deleteField } from "firebase/firestore";
+import { format, parseISO } from "date-fns";
+import { es } from "date-fns/locale";
+import { getFreshSessions, getOrCreateDeviceId } from "@/lib/device-session";
 import {
   CheckCircle2,
   Crown,
@@ -126,6 +129,10 @@ export function CashiersManager() {
   const activeCashiersCount = cashiers.filter((c) => c.active).length;
   const hasOwnerPin = Boolean(profile?.securityPin && profile.securityPin.trim().length > 0);
   const reachedCashierLimit = cashiers.length >= limits.maxCashiers;
+
+  const myDeviceId = getOrCreateDeviceId();
+  const freshSessions = useMemo(() => getFreshSessions(profile?.activeSessions), [profile?.activeSessions]);
+  const activeSessionList = useMemo(() => Object.values(freshSessions), [freshSessions]);
 
   const userProfileRef = firestore && user ? doc(firestore, "users", user.uid) : null;
 
@@ -446,6 +453,17 @@ export function CashiersManager() {
     });
   };
 
+  const handleReleaseSession = (targetDeviceId: string, deviceName: string) => {
+    if (!userProfileRef) return;
+    updateDocumentNonBlocking(userProfileRef, {
+      [`activeSessions.${targetDeviceId}`]: deleteField(),
+    });
+    toast({
+      title: "Caja liberada",
+      description: `Se cerró la sesión de "${deviceName}". El cupo ya está disponible.`,
+    });
+  };
+
   const quotaPct = limits.maxCashiers > 0 ? Math.min(100, (cashiers.length / limits.maxCashiers) * 100) : 100;
 
   return (
@@ -526,6 +544,76 @@ export function CashiersManager() {
                   >
                     Guardar
                   </Button>
+                </div>
+              </div>
+
+              {/* Cajas conectadas actualmente en tiempo real */}
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[11px] font-medium text-slate-600">
+                    Cajas conectadas ({activeSessionList.length})
+                  </Label>
+                  <span className="text-[10px] tabular-nums text-slate-400">
+                    {activeSessionList.filter((s) => s.mode !== "supervisor").length} de {limits.maxRegisters} en cobro
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  {activeSessionList.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 p-2 text-center text-[11px] text-slate-400">
+                      No hay cajas conectadas en este momento.
+                    </p>
+                  ) : (
+                    activeSessionList.map((session) => {
+                      const isMe = session.deviceId === myDeviceId;
+                      const isSupervisor = session.mode === "supervisor";
+                      return (
+                        <div
+                          key={session.deviceId}
+                          className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/60 p-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate font-semibold text-slate-800">
+                                {session.deviceName || "Caja conectada"}
+                              </span>
+                              {isMe && (
+                                <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-medium text-blue-700">
+                                  Este equipo
+                                </span>
+                              )}
+                              {isSupervisor && (
+                                <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-[9px] font-medium text-teal-800">
+                                  Supervisor
+                                </span>
+                              )}
+                            </div>
+                            <p className="truncate text-[10px] text-slate-500">
+                              {session.cashierName
+                                ? `Operador: ${session.cashierName}`
+                                : session.isOwner
+                                ? "Administrador"
+                                : "Sin operador"}
+                              {session.lastSeenAt
+                                ? ` · ${format(parseISO(session.lastSeenAt), "HH:mm", { locale: es })}`
+                                : ""}
+                            </p>
+                          </div>
+                          {!isMe && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleReleaseSession(session.deviceId, session.deviceName || "Caja")}
+                              className="h-7 shrink-0 rounded-lg px-2 text-[10px] font-medium text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                            >
+                              Liberar
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>
