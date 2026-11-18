@@ -176,6 +176,30 @@
     touch-action: manipulation;
   }
 
+  /*
+   * Previene el zoom automático indeseado en iOS Safari y Android al enfocar inputs.
+   * WebKit fuerza un zoom si el tamaño de fuente es < 16px. En pantallas móviles (< 768px)
+   * garantizamos mínimo 16px en campos interactivos sin alterar desktop.
+   */
+  @media screen and (max-width: 767px) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="hidden"]),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+
+    input.text-xs,
+    input.text-sm,
+    input.text-2xs,
+    input.text-3xs,
+    select.text-xs,
+    select.text-sm,
+    textarea.text-xs,
+    textarea.text-sm {
+      font-size: 16px !important;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

@@ -350,7 +350,7 @@ export function ExchangeRateReminder() {
     if (isLoading) return <div className="p-2 border-b bg-muted/20 text-xs animate-pulse">Cargando tasas...</div>;
 
     return (
-        <div className="sticky top-0 z-[40] border-b border-slate-200/90 bg-white/95 backdrop-blur-md text-slate-800 shadow-2xs">
+        <div className="sticky top-0 z-[40] border-b border-slate-200/90 bg-white/95 backdrop-blur-md text-slate-800 shadow-2xs pt-safe">
             {/* ---------- Móvil: barra compacta con chips uniformes (h-8, sin iconos para dar espacio a En Espera) ---------- */}
             <div className="flex h-12 items-center gap-1.5 px-3 md:hidden">
                 <button

@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'default',
+    statusBarStyle: 'black-translucent',
     title: 'Cobranza Online',
   },
   openGraph: {
@@ -35,7 +35,10 @@ export const viewport: Viewport = {
   userScalable: true,
   // Permite pintar bajo el notch y usar env(safe-area-inset-*).
   viewportFit: 'cover',
-  themeColor: '#0B61C1',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#0B61C1' },
+    { media: '(prefers-color-scheme: dark)', color: '#0A0F1D' },
+  ],
 };
 
 export default function RootLayout({

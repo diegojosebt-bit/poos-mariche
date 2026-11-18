@@ -380,11 +380,11 @@ export function AuthView() {
   };
 
   const baseInputStyle = isDark
-    ? "dark-input [color-scheme:dark] !pl-11 h-11 w-full rounded-xl border border-slate-700/80 bg-[#070B16] text-white placeholder:text-slate-500 focus:bg-[#070B16] focus-visible:bg-[#070B16] focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-sm shadow-inner transition-all"
-    : "!pl-11 h-11 w-full rounded-xl border border-slate-200 bg-slate-50/70 text-slate-900 placeholder:text-slate-400 focus:bg-white focus-visible:bg-white focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-sm transition-all";
+    ? "dark-input [color-scheme:dark] !pl-11 h-11 w-full rounded-xl border border-slate-700/80 bg-[#070B16] text-white placeholder:text-slate-500 focus:bg-[#070B16] focus-visible:bg-[#070B16] focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-base md:text-sm shadow-inner transition-all"
+    : "!pl-11 h-11 w-full rounded-xl border border-slate-200 bg-slate-50/70 text-slate-900 placeholder:text-slate-400 focus:bg-white focus-visible:bg-white focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-base md:text-sm transition-all";
   const passwordInputStyle = isDark
-    ? "dark-input [color-scheme:dark] !pl-11 !pr-11 h-11 w-full rounded-xl border border-slate-700/80 bg-[#070B16] text-white placeholder:text-slate-500 focus:bg-[#070B16] focus-visible:bg-[#070B16] focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-sm shadow-inner transition-all"
-    : "!pl-11 !pr-11 h-11 w-full rounded-xl border border-slate-200 bg-slate-50/70 text-slate-900 placeholder:text-slate-400 focus:bg-white focus-visible:bg-white focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-sm transition-all";
+    ? "dark-input [color-scheme:dark] !pl-11 !pr-11 h-11 w-full rounded-xl border border-slate-700/80 bg-[#070B16] text-white placeholder:text-slate-500 focus:bg-[#070B16] focus-visible:bg-[#070B16] focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-base md:text-sm shadow-inner transition-all"
+    : "!pl-11 !pr-11 h-11 w-full rounded-xl border border-slate-200 bg-slate-50/70 text-slate-900 placeholder:text-slate-400 focus:bg-white focus-visible:bg-white focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-base md:text-sm transition-all";
   const labelStyle = isDark ? "text-xs font-semibold text-slate-200" : "text-xs font-semibold text-slate-700";
   const eyeBtnStyle = isDark
     ? "absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
@@ -428,7 +428,7 @@ export function AuthView() {
 
       {/* Header Superior Limpio & Contrastado */}
       <header className={cn(
-        "relative z-10 w-full border-b backdrop-blur-xl transition-colors duration-300",
+        "relative z-10 w-full border-b backdrop-blur-xl transition-colors duration-300 pt-safe",
         isDark ? "border-white/[0.08] bg-[#0A0F1D]/80" : "border-slate-200/80 bg-white/85"
       )}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
