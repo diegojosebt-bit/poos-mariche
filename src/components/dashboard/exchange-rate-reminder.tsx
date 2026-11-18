@@ -325,18 +325,15 @@ export function ExchangeRateReminder() {
 
     return (
         <div className="sticky top-0 z-[40] border-b border-slate-200/90 bg-white/95 backdrop-blur-md text-slate-800 shadow-2xs">
-            {/* ---------- Móvil: barra compacta con chips uniformes (h-8) ---------- */}
+            {/* ---------- Móvil: barra compacta con chips uniformes (h-8, sin iconos para dar espacio a En Espera) ---------- */}
             <div className="flex h-12 items-center gap-1.5 px-3 md:hidden">
                 <button
                     type="button"
                     onClick={handleReloadRate}
                     disabled={isUpdating}
                     aria-label="Recargar tasa BCV"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-gradient-to-r from-emerald-50/90 via-white to-white pl-1.5 pr-2 shadow-xs active:scale-[0.98] transition-all disabled:opacity-60"
+                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-emerald-200/90 bg-gradient-to-r from-emerald-50/90 via-white to-white px-2 shadow-xs active:scale-[0.98] transition-all disabled:opacity-60"
                 >
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-2xs">
-                        <Landmark className="h-3 w-3" />
-                    </span>
                     <span className="text-[10px] font-semibold text-emerald-700">BCV</span>
                     <span className="text-xs font-bold leading-none tabular-nums text-slate-900">
                         {isUpdating ? "…" : bcvRate.toFixed(2)}
@@ -344,10 +341,7 @@ export function ExchangeRateReminder() {
                     <RefreshCw className={cn("h-3 w-3 text-emerald-600", isUpdating && "animate-spin")} />
                 </button>
 
-                <div className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-blue-200/90 bg-gradient-to-r from-blue-50/90 via-white to-white pl-1.5 pr-2.5 shadow-xs">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-2xs">
-                        <TrendingUp className="h-3 w-3" />
-                    </span>
+                <div className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-blue-200/90 bg-gradient-to-r from-blue-50/90 via-white to-white px-2 shadow-xs">
                     <span className="text-[10px] font-semibold text-blue-700">PAR</span>
                     <span className="text-xs font-bold leading-none tabular-nums text-slate-900">
                         {parallelRate.toFixed(2)}
