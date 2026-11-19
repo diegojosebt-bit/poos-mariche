@@ -26,7 +26,7 @@ import { queryCache, type WithId } from '@/lib/firestore/query-cache';
 import { fetchDocsByIds } from '@/lib/firestore/fetch-by-ids';
 import { invalidateStatsRange } from '@/lib/firestore/stats-range';
 import { useFeatureFlag } from '@/lib/features';
-import { getEffectivePlanLimits } from '@/lib/cashiers';
+import { getEffectivePlanLimits, hasCashierSystemActive, canOperatorPerform } from '@/lib/cashiers';
 import { cn } from '@/lib/utils';
 
 function POSContent() {
@@ -41,7 +41,9 @@ function POSContent() {
     const [addFlash, setAddFlash] = useState<{ key: number; name: string; qty: number } | null>(null);
     const addFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [activeRepairJob, setActiveRepairJob] = useState<RepairJob | null>(null);
-    const { addItemToCache, removeCachedItem, profile, desktopTopBarHost, mobileTopBarHost } = useDashboardStore();
+    const { addItemToCache, removeCachedItem, profile, activeOperator, desktopTopBarHost, mobileTopBarHost } = useDashboardStore();
+    const cashierMode = hasCashierSystemActive(profile);
+    const canViewCosts = !cashierMode || canOperatorPerform(activeOperator, 'canViewCostsAndProfits');
     const uid = user?.uid ?? '';
     const usePaged = useFeatureFlag(profile, 'pagedData');
     const restoreFetchAttempts = useRef<Set<string>>(new Set());
@@ -427,18 +429,20 @@ function POSContent() {
 
                     {/* En escritorio amplio (xl: >= 1280px) se ven los dos botones directos */}
                     <div className="hidden xl:flex items-center gap-1.5">
-                        <PriceCalculatorDialog>
-                            <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-9 px-3 rounded-full border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs text-xs font-medium flex items-center gap-1.5 transition-all" 
-                                aria-label="Calculadora de precios" 
-                                title="Calculadora de precios"
-                            >
-                                <Calculator className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                                <span>Calculadora</span>
-                            </Button>
-                        </PriceCalculatorDialog>
+                        {canViewCosts && (
+                            <PriceCalculatorDialog>
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-9 px-3 rounded-full border-slate-200/90 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs text-xs font-medium flex items-center gap-1.5 transition-all" 
+                                    aria-label="Calculadora de precios" 
+                                    title="Calculadora de precios"
+                                >
+                                    <Calculator className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                                    <span>Calculadora</span>
+                                </Button>
+                            </PriceCalculatorDialog>
+                        )}
                         <CustomItemDialog 
                             onAddCustomItem={handleAddCustomItem} 
                             trigger={

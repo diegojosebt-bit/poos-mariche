@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label";
 import { ArrowLeftRight, Plus } from "lucide-react";
 import { useCurrency } from "@/hooks/use-currency";
 import { SmoothCollapse } from "@/components/ui/smooth-collapse";
+import { useDashboardStore } from "@/contexts/dashboard-context";
+import { hasCashierSystemActive, canOperatorPerform } from "@/lib/cashiers";
 
 type CustomItemDialogProps = {
   onAddCustomItem: (name: string, price: number, costPrice: number) => void;
@@ -34,25 +36,29 @@ export function CustomItemDialog({ onAddCustomItem, trigger }: CustomItemDialogP
   const [priceCurrency, setPriceCurrency] = useState<CurrencyMode>("Bs");
 
   const { format, convert, bcvRate, parallelRate } = useCurrency();
+  const { profile, activeOperator } = useDashboardStore();
 
-  const costNum = parseFloat(costPrice) || 0;
+  const cashierMode = hasCashierSystemActive(profile);
+  const canViewCosts = !cashierMode || canOperatorPerform(activeOperator, 'canViewCostsAndProfits');
+
+  const costNum = canViewCosts ? (parseFloat(costPrice) || 0) : 0;
   const priceNum = parseFloat(price);
 
   // Costo: si viene en Bs se protege a tasa paralelo.
   // Venta: si viene en Bs se factura a BCV.
-  const costUsd = costCurrency === "Bs"
-    ? convert(costNum, "Bs", "USD", true)
-    : costNum;
+  const costUsd = canViewCosts
+    ? (costCurrency === "Bs" ? convert(costNum, "Bs", "USD", true) : costNum)
+    : 0;
 
-  const priceUsd = !isNaN(priceNum)
+  const priceUsd = !isNaN(priceNum) && priceNum > 0
     ? (priceCurrency === "Bs" ? convert(priceNum, "Bs", "USD") : priceNum)
     : 0;
 
   const profit = priceUsd - costUsd;
   const margin = priceUsd > 0 ? (profit / priceUsd) * 100 : 0;
-  const hasPrice = !isNaN(priceNum) && priceUsd > 0;
+  const hasPrice = !isNaN(priceNum) && priceUsd > 0.009;
 
-  const costEquivalent = costNum > 0
+  const costEquivalent = canViewCosts && costNum > 0
     ? costCurrency === "Bs"
       ? `≈ $${format(costUsd)}`
       : `≈ Bs ${format(convert(costNum, "USD", "Bs", true))}`
@@ -65,6 +71,7 @@ export function CustomItemDialog({ onAddCustomItem, trigger }: CustomItemDialogP
     : "";
 
   const toggleCostCurrency = () => {
+    if (!canViewCosts) return;
     const value = parseFloat(costPrice);
     if (!isNaN(value) && value > 0) {
       const next = costCurrency === "USD"
@@ -115,7 +122,9 @@ export function CustomItemDialog({ onAddCustomItem, trigger }: CustomItemDialogP
         <DialogHeader>
           <DialogTitle className="uppercase font-bold text-slate-900">Venta Rápida</DialogTitle>
           <DialogDescription className="text-xs text-slate-500">
-            Toca el título de cada campo para cambiar entre $ y Bs.
+            {canViewCosts
+              ? "Toca el título de cada campo para cambiar entre $ y Bs."
+              : "Ingresa el nombre y precio del artículo manual para añadirlo al cobro."}
           </DialogDescription>
         </DialogHeader>
 
@@ -136,43 +145,74 @@ export function CustomItemDialog({ onAddCustomItem, trigger }: CustomItemDialogP
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={toggleCostCurrency}
-                aria-label="Cambiar moneda del costo"
-                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-slate-600 hover:text-blue-600 transition-colors"
-              >
-                Costo ({costCurrency === "Bs" ? "Bs" : "$"})
-                <ArrowLeftRight className="w-3 h-3 opacity-60 text-blue-600" />
-              </button>
-              <Input
-                id="custom-cost"
-                name="mm-custom-cost"
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
-                autoComplete="off"
-                placeholder="0.00"
-                value={costPrice}
-                onChange={(e) => setCostPrice(e.target.value)}
-                className="h-10 font-mono bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-blue-500 shadow-2xs"
-              />
-              {costEquivalent && (
-                <p className="text-[10px] text-slate-500 text-right">{costEquivalent}</p>
-              )}
-            </div>
+          {canViewCosts ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={toggleCostCurrency}
+                  aria-label="Cambiar moneda del costo"
+                  className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-slate-600 hover:text-blue-600 transition-colors"
+                >
+                  Costo ({costCurrency === "Bs" ? "Bs" : "$"})
+                  <ArrowLeftRight className="w-3 h-3 opacity-60 text-blue-600" />
+                </button>
+                <Input
+                  id="custom-cost"
+                  name="mm-custom-cost"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  autoComplete="off"
+                  placeholder="0.00"
+                  value={costPrice}
+                  onChange={(e) => setCostPrice(e.target.value)}
+                  className="h-10 font-mono bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-blue-500 shadow-2xs"
+                />
+                {costEquivalent && (
+                  <p className="text-[10px] text-slate-500 text-right">{costEquivalent}</p>
+                )}
+              </div>
 
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={togglePriceCurrency}
+                  aria-label="Cambiar moneda de la venta"
+                  className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-slate-600 hover:text-blue-600 transition-colors"
+                >
+                  Venta ({priceCurrency === "Bs" ? "Bs" : "$"})
+                  <ArrowLeftRight className="w-3 h-3 opacity-60 text-blue-600" />
+                </button>
+                <Input
+                  id="custom-price"
+                  name="mm-custom-price"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  autoComplete="off"
+                  placeholder={priceCurrency === "Bs" ? "0,00" : "0.00"}
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                  className="h-10 font-mono bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:border-blue-500 shadow-2xs"
+                />
+                {priceEquivalent && (
+                  <p className="text-[10px] font-bold text-emerald-600 text-right">{priceEquivalent}</p>
+                )}
+              </div>
+            </div>
+          ) : (
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={togglePriceCurrency}
                 aria-label="Cambiar moneda de la venta"
-                className="flex w-full items-center gap-1 text-[10px] font-bold uppercase text-slate-600 hover:text-blue-600 transition-colors"
+                className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-600 hover:text-blue-600 transition-colors"
               >
-                Venta ({priceCurrency === "Bs" ? "Bs" : "$"})
+                Precio de Venta ({priceCurrency === "Bs" ? "Bs" : "$"})
                 <ArrowLeftRight className="w-3 h-3 opacity-60 text-blue-600" />
               </button>
               <Input
@@ -193,22 +233,26 @@ export function CustomItemDialog({ onAddCustomItem, trigger }: CustomItemDialogP
                 <p className="text-[10px] font-bold text-emerald-600 text-right">{priceEquivalent}</p>
               )}
             </div>
-          </div>
+          )}
 
-          <SmoothCollapse open={hasPrice}>
-            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-[11px]">
-              <span className="font-bold uppercase text-slate-600">Utilidad</span>
-              <span className={`font-mono font-black ${profit >= 0 ? "text-emerald-700" : "text-rose-600"}`}>
-                ${format(profit)}
-                <span className="ml-1 text-[10px] font-bold opacity-80">
-                  ({format(margin)}%)
+          {canViewCosts && (
+            <SmoothCollapse open={hasPrice}>
+              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-[11px]">
+                <span className="font-bold uppercase text-slate-600">Utilidad</span>
+                <span className={`font-mono font-black ${profit >= 0 ? "text-emerald-700" : "text-rose-600"}`}>
+                  ${format(profit)}
+                  <span className="ml-1 text-[10px] font-bold opacity-80">
+                    ({format(margin)}%)
+                  </span>
                 </span>
-              </span>
-            </div>
-          </SmoothCollapse>
+              </div>
+            </SmoothCollapse>
+          )}
 
           <p className="text-[10px] text-slate-500 text-center">
-            Costo en Bs: paralelo Bs {format(parallelRate)} · Venta en Bs: BCV Bs {format(bcvRate)}
+            {canViewCosts
+              ? `Costo en Bs: paralelo Bs ${format(parallelRate)} · Venta en Bs: BCV Bs ${format(bcvRate)}`
+              : `Venta en Bs a tasa oficial BCV: Bs ${format(bcvRate)}`}
           </p>
         </div>
 

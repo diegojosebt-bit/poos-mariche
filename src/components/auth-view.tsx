@@ -42,7 +42,8 @@ import {
   Receipt,
   Sun,
   Moon,
-  Download
+  Download,
+  HelpCircle
 } from "lucide-react";
 import { usePwaInstall } from "@/contexts/pwa-install-context";
 import { useToast } from "@/hooks/use-toast";
@@ -431,22 +432,22 @@ export function AuthView() {
         "relative z-10 w-full border-b backdrop-blur-xl transition-colors duration-300 pt-safe",
         isDark ? "border-white/[0.08] bg-[#0A0F1D]/80" : "border-slate-200/80 bg-white/85"
       )}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <AppLogo className="w-8 h-8 sm:w-9 sm:h-9" />
-            <span className={cn("font-black tracking-tight text-base sm:text-lg", isDark ? "text-white" : "text-slate-900")}>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
+            <AppLogo className="w-7 h-7 sm:w-9 sm:h-9 shrink-0" />
+            <span className={cn("whitespace-nowrap font-black tracking-tight text-sm sm:text-lg leading-none select-none", isDark ? "text-white" : "text-slate-900")}>
               Cobranza Online
             </span>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             {shouldShowInstall && (
               <button
                 type="button"
                 onClick={() => { void triggerInstall(); }}
                 aria-label="Instalar aplicación"
                 title="Instalar Cobranza Online"
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-2.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-95 cursor-pointer"
+                className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-2.5 sm:px-3 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-95 cursor-pointer"
               >
                 <Download className="h-3.5 w-3.5 shrink-0" />
                 <span>Instalar</span>
@@ -460,7 +461,7 @@ export function AuthView() {
               aria-label={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
               title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
               className={cn(
-                "inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 cursor-pointer",
+                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 cursor-pointer",
                 isDark
                   ? "border-white/10 bg-white/[0.05] text-amber-300 hover:bg-white/[0.12]"
                   : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100 shadow-sm"
@@ -473,16 +474,16 @@ export function AuthView() {
               href="https://wa.me/584241765136?text=Hola,%20deseo%20información%20sobre%20Cobranza%20Online"
               target="_blank"
               rel="noopener noreferrer"
+              aria-label="Ayuda y Soporte"
+              title="Ayuda y Soporte (WhatsApp)"
               className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
+                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 cursor-pointer",
                 isDark
-                  ? "text-slate-300 hover:text-white bg-white/[0.05] hover:bg-white/[0.1] border-white/10"
-                  : "text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 border-slate-200 shadow-sm"
+                  ? "border-white/10 bg-white/[0.05] text-emerald-400 hover:text-white hover:bg-white/[0.12]"
+                  : "border-slate-200 bg-white text-emerald-600 hover:text-emerald-700 hover:bg-slate-100 shadow-sm"
               )}
             >
-              <MessageCircle className={cn("w-3.5 h-3.5", isDark ? "text-emerald-400" : "text-emerald-600")} />
-              <span className="hidden xs:inline">Soporte WhatsApp</span>
-              <span className="xs:hidden">Ayuda</span>
+              <HelpCircle className="h-4 w-4 shrink-0" />
             </a>
           </div>
         </div>

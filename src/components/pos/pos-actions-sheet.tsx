@@ -16,6 +16,8 @@ import {
 import { PriceCalculatorDialog } from "@/components/tools/price-calculator-dialog";
 import { CustomItemDialog } from "@/components/pos/custom-item-dialog";
 import { HeldSalesSheet } from "@/components/pos/held-sales-sheet";
+import { useDashboardStore } from "@/contexts/dashboard-context";
+import { hasCashierSystemActive, canOperatorPerform } from "@/lib/cashiers";
 
 /**
  * Acciones secundarias del punto de venta en móvil.
@@ -35,6 +37,9 @@ export function POSActionsSheet({
   hideHeldSales?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const { profile, activeOperator } = useDashboardStore();
+  const cashierMode = hasCashierSystemActive(profile);
+  const canViewCosts = !cashierMode || canOperatorPerform(activeOperator, 'canViewCostsAndProfits');
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -81,16 +86,18 @@ export function POSActionsSheet({
             />
           )}
 
-          <PriceCalculatorDialog>
-            <Button
-              variant="outline"
-              onClick={() => setOpen(false)}
-              className="h-12 w-full justify-start gap-3 text-sm font-semibold border-slate-200 bg-white text-slate-800 hover:text-slate-900 hover:bg-slate-50 shadow-2xs"
-            >
-              <Calculator className="h-4 w-4 text-blue-600" />
-              Calculadora de precios
-            </Button>
-          </PriceCalculatorDialog>
+          {canViewCosts && (
+            <PriceCalculatorDialog>
+              <Button
+                variant="outline"
+                onClick={() => setOpen(false)}
+                className="h-12 w-full justify-start gap-3 text-sm font-semibold border-slate-200 bg-white text-slate-800 hover:text-slate-900 hover:bg-slate-50 shadow-2xs"
+              >
+                <Calculator className="h-4 w-4 text-blue-600" />
+                Calculadora de precios
+              </Button>
+            </PriceCalculatorDialog>
+          )}
 
           <CustomItemDialog
             onAddCustomItem={(name, price, costPrice) => {

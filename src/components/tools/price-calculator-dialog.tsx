@@ -16,10 +16,18 @@ import { Label } from "@/components/ui/label";
 import { useCurrency } from "@/hooks/use-currency";
 import { Info, Loader2 } from "lucide-react";
 import { Skeleton } from "../ui/skeleton";
+import { useDashboardStore } from "@/contexts/dashboard-context";
+import { hasCashierSystemActive, canOperatorPerform } from "@/lib/cashiers";
 
 export function PriceCalculatorDialog({ children }: { children: React.ReactNode }) {
+  const { profile, activeOperator } = useDashboardStore();
+  const cashierMode = hasCashierSystemActive(profile);
+  const canViewCosts = !cashierMode || canOperatorPerform(activeOperator, 'canViewCostsAndProfits');
+
   const [cost, setCost] = useState<number | string>("");
   const { getDynamicPrice, convert, format, getSymbol, isLoading, profitMargin } = useCurrency();
+
+  if (!canViewCosts) return null;
 
   const costValue = typeof cost === 'string' ? parseFloat(cost) : cost;
   const retailPrice = costValue > 0 ? getDynamicPrice(costValue) : 0;

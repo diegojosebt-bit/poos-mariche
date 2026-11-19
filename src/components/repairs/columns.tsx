@@ -713,11 +713,11 @@ export const StatusCell = ({ repairJob, table }: { repairJob: RepairJob, table: 
 
     return (
         <span
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/90 bg-white px-2.5 py-0.5 text-[11px] font-medium text-slate-700 shadow-2xs whitespace-nowrap"
-            title="Pendiente de cobro"
+            className="inline-flex items-center gap-1.5 rounded-full border border-rose-200/90 bg-rose-50/70 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 shadow-2xs whitespace-nowrap"
+            title="Saldo deudor pendiente de cobro"
         >
-            <Clock className="h-3 w-3 shrink-0 text-amber-500" />
-            Pendiente
+            <Clock className="h-3 w-3 shrink-0 text-rose-600" />
+            Deudor
         </span>
     );
 }

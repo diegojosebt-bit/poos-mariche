@@ -156,8 +156,10 @@ export function canOperatorAccessModule(
   operator: ActiveOperator | null,
   module: UserModule | 'settings' | 'admin',
 ): boolean {
+  if (module === 'admin' || module === 'settings') {
+    return Boolean(operator && operator.isOwner);
+  }
   if (!operator || operator.isOwner) return true;
-  if (module === 'admin' || module === 'settings') return false;
   return operator.permissions.modules.includes(module);
 }
 

@@ -39,7 +39,7 @@ export function MobileRepairCard({ job, table }: MobileRepairCardProps) {
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
-        aria-label={`${job.customerName}. ${isDelivered ? "Entregado" : isUpToDate ? "Pagado, listo para entregar" : "Pendiente de cobro"}. Toca para ver el detalle`}
+        aria-label={`${job.customerName}. ${isDelivered ? "Entregado" : isUpToDate ? "Pagado, listo para entregar" : "Saldo deudor"}. Toca para ver el detalle`}
         onClick={toggle}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -69,9 +69,9 @@ export function MobileRepairCard({ job, table }: MobileRepairCardProps) {
                 Por entregar
               </span>
             ) : (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200/90 bg-white px-2 py-px text-[10px] font-medium text-slate-700 shadow-2xs">
-                <Clock className="h-2.5 w-2.5 text-amber-500" />
-                Pendiente
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-rose-200/90 bg-rose-50/70 px-2 py-px text-[10px] font-semibold text-rose-700 shadow-2xs">
+                <Clock className="h-2.5 w-2.5 text-rose-600" />
+                Deudor
               </span>
             )}
           </p>
