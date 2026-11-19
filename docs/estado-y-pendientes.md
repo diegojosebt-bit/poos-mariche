@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Fecha** | 2026-11-18 |
-| **Resumen** | Fase 0 completa · motor de Fase 2 completo · POS/Inventario/Reparaciones en beta · búsqueda en servidor cableada · **Fase 1 parcial** · **Multi-Cajeros (1 Administrador + Cajeros) y Blindaje Multi-Caja completo** |
+| **Fecha** | 2026-11-19 |
+| **Resumen** | Fase 0 completa · motor de Fase 2 completo · POS/Inventario/Reparaciones en beta · búsqueda en servidor cableada · **Fase 1 parcial** · **Multi-Cajeros y Blindaje Multi-Caja completo** · **Optimización UI Tablets (1024x768)** · **Auditoría `searchTokens`** |
 | **Verificación** | `tsc --noEmit` → 0 errores · `npm run check:encoding` → OK |
 | **Sin probar aún** | QA en vivo contra Firestore con `?reads=1` y deploy de reglas/índices |
 
@@ -77,6 +77,25 @@
   - **Cierres independientes y sin duplicados**: en modo cajeros no sobreescribe `app-settings/main.initialBalances` globales; antes de cerrar valida con 1 lectura centinela que el turno no haya sido cerrado en otro equipo.
   - **Ventas en espera (`held_sales`)**: en Multi-Caja se reclaman y eliminan atómicamente vía `runTransaction` (con guard `claimedHeldSalesRef`).
   - **Trazabilidad completa**: `cashierId`/`cashierName` registrados al crear ventas, abonos, fiados, reparaciones, gastos y cierres.
+
+### Optimización Completa para Tablets (1024×768 y 768–1180px) (2026-11-18/19)
+- **Breakpoints**: `TABLET_MIN_WIDTH = 768`, `TABLET_MAX_WIDTH = 1180`, hooks `useIsTablet()` y `useIsDesktop()` en `src/hooks/use-mobile.tsx`.
+- **Sidebar colapsable inteligente**: `SidebarProvider` arranca colapsado en `Icon Rail` (48 px) en resoluciones `≤ 1180px`, ganando +208 px de ancho útil en tablets sin requerir clic del usuario.
+- **Top Bar / Banner compacto**: texto *"Instalar App"* a *"Instalar"*, indicador *"Paralelo"* a *"Par."*, y herramientas agrupadas en desplegable `POSActionsSheet` en pantallas `< xl`.
+- **POS Rebalanceo de 12 Columnas**:
+  - **Carrito (`CartDisplay`)**: asignado a `col-span-7` (**58.3% del ancho**, ~569 px netos en tablet horizontal de 1024 px). Máxima comodidad para tabla de artículos, selectores `[-] [1] [+]`, promociones y cobro.
+  - **Catálogo (`ProductGrid`)**: asignado a `col-span-5` (**41.7% del ancho**, ~407 px netos), adaptando cuadrícula a 2 columnas de tarjetas (`lg:grid-cols-2`) en tablet horizontal y 1 columna (`md:grid-cols-1`) en tablet vertical. Selector de categorías compactado a `sm:w-[130px]` para ampliar el buscador.
+  - En pantallas de escritorio amplio (`xl:` / `2xl:`), el catálogo conserva automáticamente 7 u 8 columnas (58.3% / 66.7%).
+- **Tablas administrativas**: columnas secundarias (`age`, `stockLevel`, `costPrice` en Inventario; `timer`, `amountPaid` en Reparaciones) ocultas con `hidden xl:table-cell` en tablets para evitar compresión de texto.
+- **Tarjetas de Reportes**: adaptadas a `sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5`.
+- **Impacto en Firestore**: **0 lecturas añadidas** (estrictamente visual / CSS Tailwind).
+
+### Auditoría e Integridad de Búsqueda Remota (`searchTokens`) (2026-11-19)
+- **Diagnóstico documentado en detalle en [`docs/auditoria-search-tokens-y-tablets.md`](./auditoria-search-tokens-y-tablets.md)**.
+- **Seguridad**: no se requiere ni se debe compartir acceso o contraseñas de Firebase; el repositorio define y audita el 100% de las mutaciones.
+- **Productos Nuevos (Manual y Excel)**: 100% garantizado; `product-form-dialog.tsx` y `bulk-import-dialog.tsx` generan y persisten `searchTokens`, `searchKeywords`, `searchName` e `isDeleted: false` en Firestore en cada alta.
+- **Productos Antiguos Editados**: se les inyectan los tokens automáticamente en Firestore al pulsar *"Guardar Cambios"*.
+- **Productos Antiguos No Editados**: no tienen `searchTokens` en la base de datos hasta ser editados o procesados por `scripts/backfill.mjs`. La búsqueda local en memoria RAM y el botón *"Cargar 100 más"* permiten localizarlos sin pérdida de datos.
 
 ---
 

@@ -96,15 +96,105 @@ export function DateRangeReport({
         const from = startOfDay(date.from);
         const to = endOfDay(date.to || date.from);
 
+        // Ventas del periodo con validación segura de fechas
+        const filteredSales = (sales || []).filter(s => {
+            if (!s.transactionDate) return false;
+            let saleDate: Date;
+            if (typeof s.transactionDate === 'string') {
+                saleDate = parseISO(s.transactionDate);
+            } else if ((s.transactionDate as any) instanceof Date) {
+                saleDate = s.transactionDate as any;
+            } else if (typeof (s.transactionDate as any)?.toDate === 'function') {
+                saleDate = (s.transactionDate as any).toDate();
+            } else {
+                saleDate = new Date(s.transactionDate);
+            }
+            if (!isValid(saleDate)) return false;
+            return isWithinInterval(saleDate, { start: from, end: to });
+        });
+
+        // Flujo neto en vivo calculado directamente desde las ventas reales en memoria (0 lecturas)
+        const liveBsBreakdown: Record<string, number> = { 
+            'Efectivo Bs': 0, 
+            'Tarjeta': 0,
+            'Pago Móvil': 0,
+            'Transferencia': 0 
+        };
+        let liveUsdNet = 0;
+
+        filteredSales.forEach(s => {
+            const isRefunded = s.status === 'refunded';
+            const refundMethod = s.refundPaymentMethod;
+            const refundAmountUSD = s.actualPaidAmount ?? s.totalAmount;
+
+            if (isRefunded && refundMethod) {
+                if (refundMethod === 'Efectivo USD' || refundMethod === 'USDT / Crypto') {
+                    liveUsdNet -= refundAmountUSD;
+                } else {
+                    const amountBs = refundAmountUSD * (s.bcvRateAtTime || settings.bcvRate);
+                    const methodKey = refundMethod === 'Tarjeta / Pago Móvil' ? 'Pago Móvil' : refundMethod;
+                    if (liveBsBreakdown[methodKey as string] !== undefined) {
+                        liveBsBreakdown[methodKey as string] -= amountBs;
+                    }
+                }
+                return;
+            }
+
+            if (s.status !== 'completed') return;
+
+            s.payments?.forEach(p => {
+                if (p.method === 'Efectivo USD' || p.method === 'USDT / Crypto') liveUsdNet += p.amount;
+                else if (p.method === 'Efectivo Bs') liveBsBreakdown['Efectivo Bs'] += p.amount;
+                else if (p.method === 'Tarjeta') liveBsBreakdown['Tarjeta'] += p.amount;
+                else if (p.method === 'Pago Móvil') liveBsBreakdown['Pago Móvil'] += p.amount;
+                else if (p.method === 'Tarjeta / Pago Móvil') {
+                    liveBsBreakdown['Pago Móvil'] += p.amount;
+                }
+                else if (p.method === 'Transferencia') {
+                    liveBsBreakdown['Transferencia'] += p.amount;
+                }
+            });
+            s.changeGiven?.forEach(c => {
+                if (c.method === 'Efectivo USD' || c.method === 'USDT / Crypto') liveUsdNet -= c.amount;
+                else if (c.method === 'Efectivo Bs') liveBsBreakdown['Efectivo Bs'] -= c.amount;
+                else if (c.method === 'Tarjeta') liveBsBreakdown['Tarjeta'] -= c.amount;
+                else if (c.method === 'Pago Móvil') liveBsBreakdown['Pago Móvil'] -= c.amount;
+                else if (c.method === 'Tarjeta / Pago Móvil') {
+                    liveBsBreakdown['Pago Móvil'] -= c.amount;
+                }
+                else if (c.method === 'Transferencia') {
+                    liveBsBreakdown['Transferencia'] -= c.amount;
+                }
+            });
+        });
+
+        // Solo descontar cambios de divisas cuando NO está filtrado por cajero (operaciones administrativas globales)
+        if (!isFilteredByCashier && exchanges && exchanges.length > 0) {
+            const filteredExchanges = exchanges.filter(e => {
+                const eDate = e.createdAt ? (typeof e.createdAt === 'string' ? parseISO(e.createdAt) : new Date(e.createdAt)) : null;
+                return eDate && isValid(eDate) && isWithinInterval(eDate, { start: from, end: to });
+            });
+
+            filteredExchanges.forEach(e => {
+                liveUsdNet += e.usdAmount;
+                if (e.sourceMethod === 'Tarjeta') liveBsBreakdown['Tarjeta'] -= e.bsAmount;
+                else if (e.sourceMethod === 'Pago Móvil' || e.sourceMethod === 'Tarjeta / Pago Móvil') liveBsBreakdown['Pago Móvil'] -= e.bsAmount;
+                else if (liveBsBreakdown[e.sourceMethod] !== undefined) {
+                    liveBsBreakdown[e.sourceMethod] -= e.bsAmount;
+                }
+            });
+        }
+
         // Fase 4: totales desde agregados (1 lectura por día del rango) solo en vista global.
         if (!isFilteredByCashier && hasRangeStats && rangeAggregate) {
-            const bsBreakdown: Record<string, number> = {
+            const hasLiveSales = filteredSales.length > 0;
+            const bsBreakdown: Record<string, number> = hasLiveSales ? liveBsBreakdown : {
                 'Efectivo Bs': rangeAggregate.byMethod.cashBs ?? 0,
                 'Tarjeta': rangeAggregate.byMethod.card ?? 0,
                 'Pago Móvil': rangeAggregate.byMethod.mobile ?? 0,
                 'Transferencia': rangeAggregate.byMethod.transfer ?? 0,
             };
-            const usdNet = rangeAggregate.byMethod.cashUSD ?? 0;
+            const usdNet = hasLiveSales ? liveUsdNet : (rangeAggregate.byMethod.cashUSD ?? 0);
 
             const itemsBreakdown = Object.entries(rangeAggregate.items)
                 .map(([key, item]) => ({
@@ -140,20 +230,10 @@ export function DateRangeReport({
             };
         }
 
-        if (!sales || !repairJobs || !products) return empty;
+        if (!sales) return empty;
 
-        const bsBreakdown: Record<string, number> = { 
-            'Efectivo Bs': 0, 
-            'Tarjeta': 0,
-            'Pago Móvil': 0,
-            'Transferencia': 0 
-        };
-        let usdNet = 0;
-
-        const filteredSales = sales.filter(s => {
-            if (!s.transactionDate) return false;
-            return isWithinInterval(new Date(s.transactionDate), { start: from, end: to });
-        });
+        const bsBreakdown = liveBsBreakdown;
+        let usdNet = liveUsdNet;
 
         const itemsMap = new Map<string, { 
             name: string, 
@@ -165,49 +245,7 @@ export function DateRangeReport({
         }>();
 
         filteredSales.forEach(s => {
-            const isRefunded = s.status === 'refunded';
-            const refundMethod = s.refundPaymentMethod;
-            const refundAmountUSD = s.actualPaidAmount ?? s.totalAmount;
-
-            if (isRefunded && refundMethod) {
-                if (refundMethod === 'Efectivo USD') {
-                    usdNet -= refundAmountUSD;
-                } else {
-                    const amountBs = refundAmountUSD * (s.bcvRateAtTime || settings.bcvRate);
-                    const methodKey = refundMethod === 'Tarjeta / Pago Móvil' ? 'Pago Móvil' : refundMethod;
-                    if (bsBreakdown[methodKey as string] !== undefined) {
-                        bsBreakdown[methodKey as string] -= amountBs;
-                    }
-                }
-                return;
-            }
-
             if (s.status !== 'completed') return;
-
-            s.payments.forEach(p => {
-                if (p.method === 'Efectivo USD') usdNet += p.amount;
-                else if (p.method === 'Efectivo Bs') bsBreakdown['Efectivo Bs'] += p.amount;
-                else if (p.method === 'Tarjeta') bsBreakdown['Tarjeta'] += p.amount;
-                else if (p.method === 'Pago Móvil') bsBreakdown['Pago Móvil'] += p.amount;
-                else if (p.method === 'Tarjeta / Pago Móvil') {
-                    bsBreakdown['Pago Móvil'] += p.amount;
-                }
-                else if (p.method === 'Transferencia') {
-                    bsBreakdown['Transferencia'] += p.amount;
-                }
-            });
-            s.changeGiven?.forEach(c => {
-                if (c.method === 'Efectivo USD') usdNet -= c.amount;
-                else if (c.method === 'Efectivo Bs') bsBreakdown['Efectivo Bs'] -= c.amount;
-                else if (c.method === 'Tarjeta') bsBreakdown['Tarjeta'] -= c.amount;
-                else if (c.method === 'Pago Móvil') bsBreakdown['Pago Móvil'] -= c.amount;
-                else if (c.method === 'Tarjeta / Pago Móvil') {
-                    bsBreakdown['Pago Móvil'] -= c.amount;
-                }
-                else if (c.method === 'Transferencia') {
-                    bsBreakdown['Transferencia'] -= c.amount;
-                }
-            });
 
             const totalCollectedNominal = s.actualPaidAmount ?? s.totalAmount;
             const itemsTotalBillable = s.items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
@@ -315,21 +353,6 @@ export function DateRangeReport({
                     });
                 }
             });
-        });
-
-        const filteredExchanges = exchanges.filter(e => {
-            const eDate = new Date(e.createdAt);
-            return isWithinInterval(eDate, { start: from, end: to });
-        });
-
-        filteredExchanges.forEach(e => {
-            usdNet += e.usdAmount;
-            if (e.sourceMethod === 'Tarjeta') bsBreakdown['Tarjeta'] -= e.bsAmount;
-            else if (e.sourceMethod === 'Pago Móvil') bsBreakdown['Pago Móvil'] -= e.bsAmount;
-            else if (e.sourceMethod === 'Tarjeta / Pago Móvil') bsBreakdown['Pago Móvil'] -= e.bsAmount;
-            else if (bsBreakdown[e.sourceMethod] !== undefined) {
-                bsBreakdown[e.sourceMethod] -= e.bsAmount;
-            }
         });
 
         const totalIncomeFromSales = filteredSales

@@ -88,6 +88,7 @@ demanda del usuario**), nunca al pintar la lista.
 | 2026-11-18 | **IDs anti-colisión** en ventas POS (`S-YYMMDD-XXXXXXXX`), reembolsos (`RFD-...`), abonos (`S-FIA-...`) y cierres (`RECON-...`) | **0** | 0 |
 | 2026-11-18 | **Reportes por cajero** (`DateRangeReport` aislado): al filtrar por un cajero omite `stats_daily` global y calcula desde las ventas en RAM | **−N** (ahorra lecturas de `stats_daily` al filtrar cajero) | 0 |
 | 2026-11-18 | **Blindaje Multi-Caja en acciones explícitas de escritura**: edición de producto por deltas, validación anti-doble reembolso, reclamo atómico de venta en espera (solo `maxRegisters > 1`) y chequeo centinela al cerrar caja | +1 sólo al guardar/confirmar acción explícita (0 al navegar/listar) | 0 extra |
+| 2026-11-19 | **Optimización UI/UX para Tablets (1024×768)**: auto-colapso de sidebar a Icon Rail (48 px), rebalanceo POS a 12 columnas (Carrito 58.3% / Productos 41.7%), banner compacto, agrupación de herramientas en desplegable y columnas prioritarias en tablas | **0** | 0 |
 
 ### Excepción deliberada 3: lecturas puntuales de integridad en escrituras Multi-Caja
 
